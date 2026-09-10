@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -76,6 +77,11 @@ func Run(targets, preTargets []core.BuildLabel, state *core.BuildState, progress
 	g, ctx := r.group(topctx)
 	r.tasks, r.ctx = g, ctx
 	r.parser = parse.InitParser(state, &r)
+	if parse.ArcatUnavailable(state.Config) {
+		// Nothing that needs arcat can work, which includes extracting any plugin. Say so here
+		// rather than letting it surface much later as a target that doesn't exist.
+		log.Warning("No arcat is published for %s_%s, so anything that needs one - including loading a plugin - will fail. Build it yourself and point [build] arcattool at it.", runtime.GOOS, runtime.GOARCH)
+	}
 	results := state.Results()
 	go checkForCycles(state, results, cancel)
 
