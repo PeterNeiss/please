@@ -23,6 +23,8 @@ go_library(
 go_test(
     name = "plz_test",
     srcs = glob(["*_test.go"]),
+    # So //test/windows can run this same binary, cross-built, under Wine.
+    visibility = ["//test/windows:all"],
     deps = [
         ":plz",
         "///third_party/go/github.com_stretchr_testify//assert",
