@@ -4,10 +4,12 @@ package core
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTmpDir(t *testing.T) {
@@ -395,7 +397,9 @@ func TestToolPath(t *testing.T) {
 	target.AddOutput("file2.go")
 	wd, _ := os.Getwd()
 	RepoRoot = wd
-	root := wd + "/plz-out/gen/src/core"
+	// Tool paths are interpolated into shell commands, so they are slash-separated even where
+	// the working directory we started from isn't.
+	root := filepath.ToSlash(wd) + "/plz-out/gen/src/core"
 	assert.Equal(t, fmt.Sprintf("%s/file1.go %s/file2.go", root, root), target.toolPath(true, ""))
 	assert.Equal(t, "src/core/file1.go src/core/file2.go", target.toolPath(false, ""))
 }
@@ -407,7 +411,7 @@ func TestToolPathWithEntryPoint(t *testing.T) {
 	target.EntryPoints = map[string]string{"f1": "file1.go"}
 	wd, _ := os.Getwd()
 	RepoRoot = wd
-	root := wd + "/plz-out/gen/src/core"
+	root := filepath.ToSlash(wd) + "/plz-out/gen/src/core"
 	assert.Equal(t, root+"/file1.go", target.toolPath(true, "f1"))
 	assert.Equal(t, "src/core/file1.go", target.toolPath(false, "f1"))
 }
@@ -626,7 +630,12 @@ func TestAllURLs(t *testing.T) {
 func TestCheckSecrets(t *testing.T) {
 	target := makeTarget1("//src/core:target1", "")
 	assert.NoError(t, target.CheckSecrets())
-	target.Secrets = append(target.Secrets, "/bin/sh")
+	// A file that exists, made rather than assumed. This used to be /bin/sh, which Windows
+	// does not have - and which passed under Wine anyway, because its Z: drive maps the host's
+	// root, so the test proved nothing there and failed on a real machine.
+	existing := filepath.Join(t.TempDir(), "a_secret")
+	require.NoError(t, os.WriteFile(existing, []byte("shhh"), 0644))
+	target.Secrets = append(target.Secrets, existing)
 	assert.NoError(t, target.CheckSecrets())
 	// Checking for files in the home directory is awkward because nothing is really
 	// guaranteed to exist. We just check the directory itself for now.

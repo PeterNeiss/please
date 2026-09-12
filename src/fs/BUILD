@@ -11,7 +11,7 @@ go_library(
         "///third_party/go/github.com_peterebden_go-deferred-regex//:go-deferred-regex",
         "///third_party/go/github.com_pkg_xattr//:xattr",
         "//src/cli/logging",
-    ],
+    ] + (["///third_party/go/golang.org_x_sys//windows"] if is_platform(os = "windows") else []),
 )
 
 go_test(
@@ -23,7 +23,9 @@ go_test(
             "*_benchmark_test.go",
         ],
     ),
-    data = ["test_data"],
+    data = [":test_data"],
+    # So //test/windows can run this same binary, cross-built, under Wine.
+    visibility = ["//test/windows:all"],
     deps = [
         ":fs",
         "///third_party/go/github.com_stretchr_testify//assert",
@@ -49,4 +51,12 @@ go_benchmark(
         "///third_party/go/github.com_stretchr_testify//require",
         "///third_party/go/github.com_zeebo_blake3//:blake3",
     ],
+)
+
+# Exposed so //test/windows can put it beside the test binary when running it under Wine.
+filegroup(
+    name = "test_data",
+    srcs = ["test_data"],
+    test_only = True,
+    visibility = ["//test/windows:all"],
 )

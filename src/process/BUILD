@@ -3,9 +3,18 @@ go_library(
     srcs = [
         "exec_linux.go",
         "exec_other.go",
+        "exec_replace_other.go",
+        "exec_replace_windows.go",
+        "exec_windows.go",
+        "kill_other.go",
+        "kill_windows.go",
         "output.go",
+        "pgroup_other.go",
+        "pgroup_windows.go",
         "process.go",
         "progress.go",
+        "shell_other.go",
+        "shell_windows.go",
     ],
     pgo_file = "//:pgo",
     visibility = ["PUBLIC"],
@@ -13,7 +22,7 @@ go_library(
         "///third_party/go/github.com_peterebden_go-deferred-regex//:go-deferred-regex",
         "//src/cli",
         "//src/cli/logging",
-    ],
+    ] + (["///third_party/go/golang.org_x_sys//windows"] if is_platform(os = "windows") else []),
 )
 
 go_test(
@@ -22,8 +31,12 @@ go_test(
         "process_test.go",
         "progress_test.go",
     ],
+    # So //test/windows can run this same binary, cross-built, under Wine. The process layer is
+    # almost entirely separate code there, and nothing else covers it.
+    visibility = ["//test/windows:all"],
     deps = [
         ":process",
         "///third_party/go/github.com_stretchr_testify//assert",
+        "///third_party/go/github.com_stretchr_testify//require",
     ],
 )

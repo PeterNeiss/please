@@ -12,6 +12,7 @@ import (
 	iofs "io/fs"
 	"iter"
 	"path/filepath"
+	"runtime"
 	"runtime/pprof"
 	"sort"
 	"strings"
@@ -886,6 +887,19 @@ func (state *BuildState) SyncParsePackage(label BuildLabel) *Package {
 	return state.Graph.PackageByLabel(label) // Important to check again; it's possible to race against this whole lot.
 }
 
+// ReleasePendingParse gives back the claim on parsing a package that SyncParsePackage granted,
+// for a package that has not been parsed and is not going to be.
+//
+// It exists for callers that parse a package speculatively - to find out whether it exists at
+// all - and swallow the error when it doesn't. Such a caller still took the claim, and if it
+// keeps it every later caller asking about the same package waits forever for a parse nobody is
+// going to do. That shows up as a hang with no output rather than an error.
+func (state *BuildState) ReleasePendingParse(label BuildLabel) {
+	if ch, present := state.progress.pendingPackages.Delete(label.packageKey()); present {
+		close(ch) // Anything already waiting goes back to trying for itself.
+	}
+}
+
 func waitOnChan[T any](ch chan T, message string, args ...any) {
 	start := time.Now()
 	t := time.NewTimer(10 * time.Second)
@@ -1479,11 +1493,18 @@ func newXXHash() hash.Hash {
 }
 
 func executorFromConfig(config *Configuration) *process.Executor {
+	wantsSandbox := config.Sandbox.Build || config.Sandbox.Test
+	if wantsSandbox && !sandboxSupported() {
+		// Saying the tool is missing would be misleading here - there is nothing to install.
+		log.Warningf("Sandboxing is not implemented on %s; build actions and tests will run without isolation.", runtime.GOOS)
+		return process.NewSandboxingExecutor(false, process.NamespaceNever, "", config.Shell(), config.ShellArgs())
+	}
+
 	tool := config.Sandbox.Tool
 	if !filepath.IsAbs(tool) {
 		var err error
 		tool, err = LookBuildPath(tool, config)
-		if err != nil && (config.Sandbox.Build || config.Sandbox.Test) {
+		if err != nil && wantsSandbox {
 			log.Warningf("Can't find sandbox tool %v on the path: %v", config.Sandbox.Tool, err)
 		}
 	} else if !fs.FileExists(tool) {
@@ -1491,9 +1512,11 @@ func executorFromConfig(config *Configuration) *process.Executor {
 	}
 
 	return process.NewSandboxingExecutor(
-		config.Sandbox.Tool == "" && (config.Sandbox.Build || config.Sandbox.Test),
+		config.Sandbox.Tool == "" && wantsSandbox,
 		process.NamespacingPolicy(config.Sandbox.Namespace),
 		tool,
+		config.Shell(),
+		config.ShellArgs(),
 	)
 }
 

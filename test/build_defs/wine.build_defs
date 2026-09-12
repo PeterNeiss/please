@@ -1,0 +1,439 @@
+# Test macros that run Windows binaries under Wine.
+#
+# The port is developed and built on Linux, so these are how anything about its *runtime*
+# behaviour gets checked at all before a Windows machine exists. See
+# docs/design/windows/05-testing-strategy.md, which is honest about what Wine does and does
+# not cover.
+#
+# Everything here is labelled 'wine' and excluded from the default test run, because building
+# it means cross-compiling the Go standard library for Windows, which is a lot of work to
+# impose on someone who only wanted to run the unit tests.
+
+# Wine's first run initialises a prefix, which is slow and produces a few hundred MB. One
+# shared prefix for all these tests is enough - wineserver serialises access to it. $TMP_DIR
+# is <repo root>/plz-out/tmp/..., so trimming from the last /plz-out/ gets back to the root.
+# This has to be built in the command rather than passed in env, which isn't expanded.
+WINEPREFIX = "${TMP_DIR%/plz-out/*}/plz-out/wineprefix"
+
+# WINEDEBUG=-all silences Wine's own chatter, which would otherwise be interleaved with the
+# test output we are trying to parse.
+WINE_ENV = {"WINEDEBUG": "-all"}
+
+def _wine_setup_cmd():
+    """Returns a command that prepares the shared Wine prefix and isolates this test in it."""
+
+    hosts = '"$WINEPREFIX/drive_c/windows/system32/drivers/etc/hosts"'
+    return " && ".join([
+        f'export WINEPREFIX="{WINEPREFIX}"',
+        # wineboot is idempotent but not free, so only run it if the prefix isn't there. Two
+        # tests racing to create it is fine; wineserver serialises access.
+        'if [ ! -d "$WINEPREFIX" ]; then wineboot --init >/dev/null 2>&1 || true; fi',
+        # Wine ships a hosts file with the localhost line commented out, so anything that
+        # resolves it - a test's own HTTP server, say - hangs until it gives up.
+        f'grep -q "^127.0.0.1 localhost" {hosts} || echo "127.0.0.1 localhost" >> {hosts}',
+        # Point the Windows home directory at this test's own temp dir. Otherwise every test
+        # shares the one inside the prefix and anything written to ~ leaks between runs; a
+        # read-only file left there can't even be replaced on Windows.
+        'export USERPROFILE="$(winepath -w "$TMP_DIR")"',
+    ])
+
+def wine_go_test(
+        name:str,
+        test:str,
+        data:list=[],
+        needs_shell:bool=False,
+        labels:list=[],
+        timeout:int=600,
+        size:str=None):
+    """Runs a Go test binary that was cross-compiled for Windows, under Wine.
+
+    Args:
+      name (str): Name of the rule.
+      test (str): The go_test target to run, which must be in the windows_amd64 architecture -
+                  i.e. a label of the form ///windows_amd64//src/core:core_test.
+      data (list): Runtime data the test needs. A go_test's own data doesn't come along when
+                   another rule depends on it, so anything the test reads has to be repeated
+                   here; it lands at the same path it would have under go_test.
+      needs_shell (bool): True if the test runs build actions, which need a shell. Puts the
+                   bundled busybox next to the test binary, which is where Please looks for it
+                   when it isn't on the PATH - the same arrangement as an install.
+      labels (list): Extra labels for the rule.
+      timeout (int): Test timeout in seconds. Wine is slower than native, and these binaries
+                     are being run cold.
+      size (str): Test size.
+    """
+
+    # The binary has to be renamed. The go plugin names its output after the rule, so the
+    # cross-built binary is called e.g. 'core_test' with no extension - and Go's exec package
+    # on Windows will not run a file whose name has no extension in PATHEXT, even when handed
+    # its full path. Any test whose subject re-execs itself fails obscurely without this.
+    cmds = [
+        _wine_setup_cmd(),
+        'cp "$DATA_TEST_BINARY" "$TMP_DIR/test.exe"',
+        # A go_test's $DATA names only its data; here it would also name the test binary, which
+        # is not something the test put there. Tests that read $DATA expect the former.
+        # :- because the shell runs with -u and this is unset when the test has no data.
+        'export DATA="${DATA_FILES:-}"',
+    ]
+    if needs_shell:
+        # In a directory of its own, on the Windows PATH, rather than in the working directory:
+        # Go's exec refuses to run something it found relative to the current directory, and
+        # this is how an install has it anyway. WINEPATH is what Wine adds to the Windows PATH.
+        cmds.append('mkdir -p "$TMP_DIR/shell" && cp "$DATA_BUSYBOX" "$TMP_DIR/shell/busybox.exe"')
+        cmds.append('export WINEPATH="$(winepath -w "$TMP_DIR/shell")"')
+
+    # Go test binaries print in the format Please parses when it isn't given JUnit XML.
+    cmds.append('wine "$TMP_DIR/test.exe" -test.v 2>&1 | tee "$TMP_DIR/test.results"')
+    test_cmd = " && ".join(cmds)
+
+    test_data = {"TEST_BINARY": [test], "FILES": data}
+    if needs_shell:
+        test_data["BUSYBOX"] = ["///windows_amd64//third_party/binary:busybox"]
+    return gentest(
+        name = name,
+        size = size,
+        timeout = timeout,
+        data = test_data,
+        env = WINE_ENV,
+        labels = labels + ["wine", "windows"],
+        local = True,
+        # Wine needs a real filesystem it can put a prefix on, and talks to a wineserver that
+        # outlives the process; neither survives the sandbox.
+        sandbox = False,
+        test_cmd = test_cmd,
+    )
+
+def _wine_run_cmd(binary:str, args:str, exit_code:int, batch:bool=False):
+    """Returns a command that runs a Windows binary under Wine and checks how it finished.
+
+    The status is captured rather than left to the shell: build actions run with -e, so an exit
+    code we are expecting would otherwise end the command before we could check it.
+
+    The pipe is not only for the log. Wine's console emulation gives a child process handles
+    that some programs - Python among them - reject at startup unless the output is a pipe,
+    which has nothing to do with whatever is being tested.
+
+    A batch file is handed to cmd.exe explicitly, and it matters that it is. Handing one to
+    `wine` looks like it works and is not the same thing: what Wine cannot load as a PE it
+    passes to the host, so a file that still has a Unix shebang on it runs under /bin/sh and
+    produces exactly the output the test was hoping for. The whole point of the wrapper is
+    that Windows has no shebang mechanism, so a test that leaves this to Wine tests nothing.
+    """
+    run = f'wine "{binary}" {args}'
+    if batch:
+        run = f'wine cmd /c "$(winepath -w "{binary}")" {args}'
+    return " && ".join([
+        "code=0",
+        f'{run} 2>&1 | tee "$TMP_DIR/output" || code=$?',
+        f'[ "$code" = "{exit_code}" ]',
+    ])
+
+def wine_binary_test(
+        name:str,
+        binary:str,
+        args:str="",
+        data:list=[],
+        expected_output:str="",
+        exit_code:int=0,
+        batch:bool=False,
+        needs_shell:bool=False,
+        runs:int=1,
+        labels:list=[],
+        timeout:int=600,
+        size:str=None):
+    """Runs a Windows binary under Wine and checks what it printed and how it exited.
+
+    For things that are not tests themselves - a cc_binary, say - where the point is that the
+    program runs at all and produces the right answer.
+
+    Args:
+      name (str): Name of the rule.
+      binary (str): The target to run, which must be in the windows_amd64 architecture - i.e. a
+                    label of the form ///windows_amd64//pkg:it.
+      args (str): Arguments to pass to it.
+      data (list): Runtime data it needs. It lands beside the binary, which on Windows is also
+                   how a DLL is found: there is no rpath, so it has to be in the same directory.
+      expected_output (str): Text its output should contain. Empty to check nothing.
+      exit_code (int): The exit code it should finish with.
+      batch (bool): True if it is a .cmd rather than a .exe, so that it is run through cmd.exe
+                   rather than left to Wine, which would fall back to the host shell.
+      needs_shell (bool): True if running it involves a shell - an sh_binary's wrapper does.
+                   Puts the bundled busybox on the Windows PATH, which is where such a wrapper
+                   expects to find it.
+      runs (int): How many times to run it, all in the same directory. More than one is worth
+                   asking for when it writes something it will meet again on the next run: a
+                   read-only file left behind cannot be replaced on Windows at all.
+      labels (list): Extra labels for the rule.
+      timeout (int): Test timeout in seconds.
+      size (str): Test size.
+    """
+
+    cmds = [_wine_setup_cmd()]
+    test_data = {"BINARY": [binary], "FILES": data}
+    if needs_shell:
+        # Its own directory rather than the working one: this is how an install has it, and Go's
+        # exec refuses to run something found relative to the current directory anyway.
+        test_data["BUSYBOX"] = ["///windows_amd64//third_party/binary:busybox"]
+        cmds.append('mkdir -p "$TMP_DIR/shell" && cp "$DATA_BUSYBOX" "$TMP_DIR/shell/busybox.exe"')
+        cmds.append('export WINEPATH="$(winepath -w "$TMP_DIR/shell")"')
+    for _ in range(runs):
+        cmds.append(_wine_run_cmd("$DATA_BINARY", args, exit_code, batch = batch))
+    if expected_output:
+        cmds.append(f'grep -q "{expected_output}" "$TMP_DIR/output"')
+
+    return gentest(
+        name = name,
+        size = size,
+        timeout = timeout,
+        data = test_data,
+        env = WINE_ENV,
+        labels = labels + ["wine", "windows"],
+        local = True,
+        no_test_output = True,
+        sandbox = False,
+        test_cmd = " && ".join(cmds),
+    )
+
+def wine_pex_test(
+        name:str,
+        pex:str,
+        args:str="",
+        data:list=[],
+        exit_code:int=0,
+        test_output:bool=True,
+        labels:list=[],
+        timeout:int=600,
+        size:str=None):
+    """Runs a .pex that was cross-compiled for Windows, under Wine.
+
+    A .pex is not a script with a shebang, it is a zip with an executable stub in front of it,
+    and that stub has to be a Windows one. Running it here is therefore a real test of the
+    preamble please_pex prepended, not only of the Python inside.
+
+    The interpreter is the embeddable Python from python.org, put on the Windows PATH rather
+    than installed - which is also what the preamble's default search for "python" expects to
+    find.
+
+    Args:
+      name (str): Name of the rule.
+      pex (str): The python_test or python_binary target to run, which must be in the
+                 windows_amd64 architecture - i.e. a label of the form ///windows_amd64//pkg:it.
+      args (str): Arguments to pass to it.
+      data (list): Runtime data it needs, at the path it expects to read it from. A pex's own
+                   data doesn't come along when another rule depends on it.
+      exit_code (int): The exit code it should finish with.
+      test_output (bool): True if it is a python_test, and so writes JUnit XML that Please
+                          should read. False for a python_binary, which writes none.
+      labels (list): Extra labels for the rule.
+      timeout (int): Test timeout in seconds.
+      size (str): Test size.
+    """
+
+    # Run it where it lands, under its own name. Unlike a go_test there is nothing to rename:
+    # the .pex is already called .pex.exe, which is the whole point.
+    return gentest(
+        name = name,
+        size = size,
+        timeout = timeout,
+        data = {
+            "PEX": [pex],
+            # WINEPATH is what Wine adds to the Windows PATH. python.exe is looked up on it by
+            # name, which is what a .pex does when nothing has configured an interpreter path.
+            "PYTHON": ["//third_party/binary:python-windows"],
+            "FILES": data,
+        },
+        env = WINE_ENV,
+        # The test runner writes JUnit XML into a directory rather than a single file.
+        labels = labels + ["wine", "windows"] + (["test_results_dir"] if test_output else []),
+        local = True,
+        no_test_output = not test_output,
+        sandbox = False,
+        test_cmd = " && ".join([
+            _wine_setup_cmd(),
+            'export WINEPATH="$(winepath -w "$DATA_PYTHON")"',
+            _wine_run_cmd("$DATA_PEX", args, exit_code),
+        ]),
+    )
+
+def wine_plz_test(
+        name:str,
+        repo:str,
+        cmd:str,
+        expected_output:dict={},
+        labels:list=[],
+        expected_failure:bool=False,
+        timeout:int=600):
+    """Runs the cross-built please.exe under Wine against a small test repo.
+
+    This is the counterpart of please_repo_e2e_test for Windows: it checks that Please
+    actually *runs* there, rather than merely that it compiles.
+
+    Args:
+      name (str): Name of the rule.
+      repo (str): A directory containing a small Please repo to run in.
+      cmd (str): Arguments to pass to please.exe, e.g. 'build //:target'.
+      expected_output (dict): Maps a file the build should produce, relative to the repo root,
+                              to a file in the repo holding the content it should have.
+      labels (list): Extra labels for the rule.
+      expected_failure (bool): True if the command is expected to exit non-zero.
+      timeout (int): Test timeout in seconds.
+    """
+
+    # The Windows release layout: please.exe with busybox.exe beside it, which is where the
+    # default [build] shell of 'busybox' gets resolved from. Nothing is put on the PATH, so
+    # this also covers the resolution the bundling depends on.
+    setup = [
+        _wine_setup_cmd(),
+        'mkdir -p "$TMP_DIR/plzdir"',
+        'cp "$DATA_PLEASE" "$TMP_DIR/plzdir/please.exe"',
+        'cp "$DATA_BUSYBOX" "$TMP_DIR/plzdir/busybox.exe"',
+        'cp -r "$DATA_REPO" "$TMP_DIR/repo"',
+        'cd "$TMP_DIR/repo"',
+    ]
+    run = f'wine "$TMP_DIR/plzdir/please.exe" {cmd} 2>&1 | tee "$TMP_DIR/output"'
+    if expected_failure:
+        # Please exits non-zero, so check that rather than letting the pipeline fail us.
+        run = f"if {run}; then exit 1; fi"
+    test_cmd = " && ".join(setup + [run] + [
+        f'diff -u "{expected}" "{out}"'
+        for out, expected in expected_output.items()
+    ])
+    return gentest(
+        name = name,
+        timeout = timeout,
+        data = {
+            "PLEASE": ["///windows_amd64//src:please"],
+            "BUSYBOX": ["///windows_amd64//third_party/binary:busybox"],
+            "REPO": [repo],
+        },
+        env = WINE_ENV,
+        labels = labels + ["wine", "windows"],
+        local = True,
+        no_test_output = True,
+        sandbox = False,
+        test_cmd = test_cmd,
+    )
+
+def wine_plz_release_test(
+        name:str,
+        repo:str,
+        cmd:str,
+        expected_output:dict={},
+        remove:list=[],
+        expected_failure:bool=False,
+        labels:list=[],
+        timeout:int=900):
+    """Runs the Windows release zip under Wine, against a small test repo, with no network.
+
+    The counterpart of wine_plz_test for the release rather than for please.exe. It extracts the
+    real artifact instead of assembling an install out of its parts, because what is under test
+    is what the artifact carries: the plugin archives beside the binary, and the helper tools
+    that a Windows install has no other way to get. See docs/design/windows/08-offline-release.md.
+
+    The network is denied by pointing the proxy at a closed port, which proves there was no
+    HTTP egress rather than no egress at all. That is the right scope here - fetching a plugin
+    is an HTTP fetch - and it is what there is: Wine aborts outright inside a user namespace,
+    so `unshare -rn` is not available to make it airtight.
+
+    The negative control is what makes this rigorous rather than suggestive. With the network
+    gone, taking the bundled archive away has to break the build; if it does not, the archive
+    was never being read and the passing test meant nothing.
+
+    Args:
+      name (str): Name of the rule.
+      repo (str): A directory containing a small Please repo to run in.
+      cmd (str): Arguments to pass to please.exe, e.g. 'build //:target'.
+      expected_output (dict): Maps a file the build should produce, relative to the repo root,
+                              to a file in the repo holding the content it should have.
+      remove (list): Files to delete from the extracted install before running. For the negative
+                     control: if taking a plugin archive away does not break the build, the
+                     archives were never being used and the test proves nothing.
+      expected_failure (bool): True if the command is expected to exit non-zero.
+      labels (list): Extra labels for the rule.
+      timeout (int): Test timeout in seconds.
+    """
+
+    setup = [
+        _wine_setup_cmd(),
+        'mkdir -p "$TMP_DIR/install"',
+        # $DATA_ZIP is relative to the test directory, and unzip is about to change into
+        # another one.
+        'zip="$PWD/$DATA_ZIP"',
+        'cd "$TMP_DIR/install" && unzip -q "$zip" && cd -',
+        'cp -r "$DATA_REPO" "$TMP_DIR/repo"',
+    ] + [
+        f'rm "$TMP_DIR/install/please/{f}"'
+        for f in remove
+    ] + [
+        'cd "$TMP_DIR/repo"',
+        # Nothing is exempt, hence the empty NO_PROXY.
+        "export HTTP_PROXY=http://127.0.0.1:1 HTTPS_PROXY=http://127.0.0.1:1 NO_PROXY=",
+    ]
+
+    run = f'wine "$TMP_DIR/install/please/please.exe" {cmd} 2>&1 | tee "$TMP_DIR/output"'
+    if expected_failure:
+        run = f"if {run}; then exit 1; fi"
+
+    test_cmd = " && ".join(setup + [run] + [
+        f'diff -u "{expected}" "{out}"'
+        for out, expected in expected_output.items()
+    ])
+    return gentest(
+        name = name,
+        timeout = timeout,
+        data = {
+            "ZIP": ["///windows_amd64//package:please_zip"],
+            "REPO": [repo],
+        },
+        env = WINE_ENV,
+        labels = labels + ["wine", "windows"],
+        local = True,
+        no_test_output = True,
+        sandbox = False,
+        test_cmd = test_cmd,
+    )
+
+def wine_bundle_test(
+        name:str,
+        bundle:str,
+        test:str,
+        labels:list=[],
+        timeout:int=600):
+    """Runs one entry out of the native test bundle, under Wine, the way Windows will run it.
+
+    This is the only thing that checks how windows_test_bundle packages a test without a
+    Windows machine: the data placement, the $DATA it records, the .exe rename, and the shell
+    marker. It deliberately does not reuse wine_go_test's staging - the point is to run what
+    came out of the bundle, from the bundle's own directory layout.
+
+    Args:
+      name (str): Name of the rule.
+      bundle (str): The windows_test_bundle target to take the test out of.
+      test (str): Which entry to run, e.g. "fs_test".
+      labels (list): Extra labels for the rule.
+      timeout (int): Test timeout in seconds.
+    """
+
+    # Copied out because the tests write to their working directory, and the bundle is a build
+    # output; chmod so unpacking over read-only outputs doesn't fail the way it does on Windows.
+    cmds = [
+        _wine_setup_cmd(),
+        f'cp -r "$DATA_BUNDLE/tests/{test}" "$TMP_DIR/run"',
+        'chmod -R u+w "$TMP_DIR/run"',
+        'cd "$TMP_DIR/run"',
+        # Exactly what the PowerShell driver does: $DATA from the file beside the binary, and
+        # the bundled shell on the PATH when the marker says the test runs build actions.
+        'if [ -f DATA.txt ]; then export DATA="$(cat DATA.txt)"; else export DATA=""; fi',
+        f'if [ -f NEEDS_SHELL ]; then export WINEPATH="$(winepath -w "$DATA_BUNDLE/shell")"; fi',
+        'wine test.exe -test.v 2>&1 | tee "$TMP_DIR/test.results"',
+    ]
+    return gentest(
+        name = name,
+        timeout = timeout,
+        data = {"BUNDLE": [bundle]},
+        env = WINE_ENV,
+        labels = labels + ["wine", "windows"],
+        local = True,
+        sandbox = False,
+        test_cmd = " && ".join(cmds),
+    )

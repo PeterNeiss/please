@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -20,7 +21,8 @@ var RepoRoot string
 var InitialWorkingDir string
 
 // InitialPackagePath is the initial subdir of the working directory, ie. what package did we start in.
-// This is similar but not identical to InitialWorkingDir.
+// This is similar but not identical to InitialWorkingDir. It is a build label package name, so it
+// is always slash-separated, even on Windows.
 var InitialPackagePath string
 
 // usingBazelWorkspace is true if we detected a Bazel WORKSPACE file to find our repo root.
@@ -78,7 +80,8 @@ func InitialPackage() []BuildLabel {
 			label.Name = "..."
 			return []BuildLabel{label}
 		}
-		dir = filepath.Dir(dir)
+		// path, not filepath: this is a package name, which is slash-separated everywhere.
+		dir = path.Dir(dir)
 	}
 	return WholeGraph
 }
@@ -89,16 +92,72 @@ func getRepoRoot(filename string) (string, string) {
 	if err != nil {
 		log.Fatalf("Couldn't determine working directory: %s", err)
 	}
-	// Walk up directories looking for a .plzconfig file, which we use to identify the root.
+	return findRepoRootFrom(dir, filename)
+}
+
+// findRepoRootFrom walks up from the given directory looking for the file that marks a repo
+// root, and returns that directory and the package the walk started in.
+func findRepoRootFrom(dir, filename string) (string, string) {
 	initial := dir
 	for dir != "" {
 		if PathExists(filepath.Join(dir, filename)) {
-			return dir, strings.TrimLeft(initial[len(dir):], "/")
+			// The second return is a package name, so it has to come back slash-separated
+			// whatever the OS gave us - anything else fails build label validation, and the
+			// initial package silently becomes the whole repo.
+			return dir, strings.Trim(filepath.ToSlash(initial[len(dir):]), "/")
 		}
-		dir, _ = filepath.Split(dir)
-		dir = strings.TrimRight(dir, "/")
+		// Stop when the walk stops going anywhere, rather than when it reaches an empty
+		// string. On Windows it never reaches one: trimming the separator off "C:\" leaves
+		// "C:", and splitting that returns it unchanged, because the volume name is the whole
+		// path. Before this, any plz run outside a repo spun here for ever, one stat per
+		// iteration, instead of reporting that it couldn't find a root.
+		parent, _ := filepath.Split(dir)
+		parent = strings.TrimRight(parent, fs.PathSeparators)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
 	return "", ""
+}
+
+// IsInRepoRoot returns true if the given path is inside the repo.
+//
+// It exists because comparing against RepoRoot directly is wrong on Windows. RepoRoot is in the
+// OS's own separator, so it is backslashed there, while paths that arrive from outside - a
+// file:// URL, a coverage report from another tool - are usually slash-separated. A plain
+// HasPrefix then never matches, and a guard written that way silently stops guarding.
+//
+// It also only matches at a path boundary, so that /repo/elsewhere is not inside /repo/else.
+func IsInRepoRoot(path string) bool {
+	_, ok := trimRepoRoot(path)
+	return ok
+}
+
+// TrimRepoRoot returns the given path relative to the repo root, or unchanged if it is not
+// inside it. The result keeps whatever separators it arrived with.
+func TrimRepoRoot(path string) string {
+	if trimmed, ok := trimRepoRoot(path); ok {
+		return trimmed
+	}
+	return path
+}
+
+func trimRepoRoot(path string) (string, bool) {
+	root := filepath.ToSlash(RepoRoot)
+	normalised := filepath.ToSlash(path)
+	if root == "" || !strings.HasPrefix(normalised, root) {
+		return path, false
+	}
+	rest := path[len(root):]
+	if rest == "" {
+		return "", true
+	}
+	// Only a match at a boundary; "/repo" is not a prefix of "/repository".
+	if !strings.ContainsRune(fs.PathSeparators, rune(rest[0])) && !strings.HasSuffix(root, "/") {
+		return path, false
+	}
+	return strings.TrimLeft(rest, fs.PathSeparators), true
 }
 
 // StartedAtRepoRoot returns true if the build was initiated from the repo root.
@@ -125,7 +184,9 @@ func IterSources(state *BuildState, graph *BuildGraph, target *BuildTarget, incl
 		for input := range IterInputs(state, graph, target, includeTools, false) {
 			fullPaths := input.FullPaths(graph)
 			for i, sourcePath := range input.Paths(graph) {
-				if tmpPath := filepath.Join(tmpDir, sourcePath); !done[tmpPath] {
+				// path, not filepath: these are plz-out paths, and they reach build actions
+				// through the environment as $SRCS.
+				if tmpPath := path.Join(tmpDir, sourcePath); !done[tmpPath] {
 					if !yield(fullPaths[i], tmpPath) {
 						return
 					}
@@ -511,15 +572,29 @@ func CollapseHash(key []byte) []byte {
 // The main difference is that it looks based on our config which isn't necessarily the same
 // as the external environment variable.
 func LookPath(filename string, paths []string) (string, error) {
+	names := fs.ExecutableNames(filename)
+	dirs := 0
 	for _, p := range paths {
-		for _, p2 := range strings.Split(p, ":") {
-			p3 := filepath.Join(p2, filename)
-			if _, err := os.Stat(p3); err == nil {
-				return p3, nil
+		for _, p2 := range fs.SplitPathList(p) {
+			if p2 != "" {
+				dirs++
+			}
+			for _, name := range names {
+				p3 := filepath.Join(p2, name)
+				if _, err := os.Stat(p3); err == nil {
+					return p3, nil
+				}
 			}
 		}
 	}
-	return "", fmt.Errorf("%s not found in path %s", filename, strings.Join(paths, ":"))
+	err := fmt.Errorf("%s not found in path %s", filename, strings.Join(paths, string(os.PathListSeparator)))
+	if dirs <= 1 {
+		// Only Please's own directory was searched, which means no build path is configured.
+		// There is no default one on Windows - nothing there corresponds to /usr/bin - so this
+		// is the first thing a new user hits, and the message above doesn't hint at the answer.
+		return "", fmt.Errorf("%w\nNo [build] path is configured; set one to the directories your tools live in", err)
+	}
+	return "", err
 }
 
 // LookBuildPath is like LookPath but takes the config's build path into account.

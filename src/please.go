@@ -12,7 +12,6 @@ import (
 	"runtime/pprof"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/thought-machine/go-flags"
@@ -697,6 +696,11 @@ var buildFunctions = map[string]func() int{
 		if len(opts.Clean.Args.Targets) == 0 && core.InitialPackage()[0].PackageName == "" {
 			if len(opts.BuildFlags.Include) == 0 && len(opts.BuildFlags.Exclude) == 0 {
 				// Clean everything, doesn't require parsing at all.
+				// The log file lives under plz-out by default, and on Windows a directory
+				// cannot be renamed or deleted while this process holds a file inside it open,
+				// so let go of it first. The detached child that does the deletion avoids
+				// opening one at all, for the same reason.
+				cli.CloseFileLogging()
 				state := core.NewBuildState(config)
 				clean.Clean(config, cache.NewCache(state), !opts.Clean.NoBackground)
 				return 0
@@ -716,10 +720,9 @@ var buildFunctions = map[string]func() int{
 	"op": func() int {
 		cmd := core.ReadPreviousOperationOrDie()
 		log.Notice("OP PLZ: %s", strings.Join(cmd, " "))
-		// Annoyingly we don't seem to have any access to execvp() which would be rather useful here...
 		executable, err := os.Executable()
 		if err == nil {
-			err = syscall.Exec(executable, append([]string{executable}, cmd...), os.Environ())
+			err = process.ExecReplace(executable, append([]string{executable}, cmd...), os.Environ())
 		}
 		log.Fatalf("SORRY OP: %s", err) // On success Run never returns.
 		return 1

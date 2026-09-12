@@ -19,7 +19,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/hashicorp/go-retryablehttp"
@@ -41,6 +40,9 @@ var minSignedVersion = semver.Version{Major: 9, Minor: 2}
 var httpClient *retryablehttp.Client
 
 const milestoneURL = "https://please.build/milestones"
+
+// pleaseExeName is what the Please binary is called inside a version directory.
+const pleaseExeName = "please" + fs.ExeSuffix
 
 // pleaseVersion returns the current version of Please as a semver.
 func pleaseVersion() semver.Version {
@@ -95,7 +97,11 @@ func CheckAndUpdate(config *core.Configuration, updatesEnabled, updateCommand, f
 	core.ReturnToInitialWorkingDir()
 	args := filterArgs(forceUpdate, append([]string{newPlease}, os.Args[1:]...))
 	log.Info("Executing %s", strings.Join(args, " "))
-	if err := syscall.Exec(newPlease, args, os.Environ()); err != nil {
+	// Release the repo lock before handing over. On Unix the exec would drop it for us, since
+	// Go opens files O_CLOEXEC; on Windows we stay alive as the new process's parent and would
+	// otherwise deadlock it against ourselves.
+	core.ReleaseRepoLock()
+	if err := process.ExecReplace(newPlease, args, os.Environ()); err != nil {
 		log.Fatalf("Failed to exec new Please version %s: %s", newPlease, err)
 	}
 	// Shouldn't ever get here. We should have either exec'd or died above.
@@ -184,7 +190,7 @@ func shouldUpdate(config *core.Configuration, updatesEnabled, updateCommand, pre
 // downloadAndLinkPlease downloads a new Please version and links it into place, if needed.
 // It returns the new location and dies on failure.
 func downloadAndLinkPlease(config *core.Configuration, verify bool, progress bool) string {
-	newPlease := filepath.Join(config.Please.Location, config.Please.Version.VersionString(), "please")
+	newPlease := filepath.Join(config.Please.Location, config.Please.Version.VersionString(), pleaseExeName)
 
 	if !core.PathExists(newPlease) {
 		downloadPlease(config, verify, progress)
@@ -259,7 +265,7 @@ func copyFile(r io.Reader, newDir string) {
 	if err := os.MkdirAll(newDir, fs.DirPermissions); err != nil {
 		panic(err)
 	}
-	f, err := os.OpenFile(filepath.Join(newDir, "please"), os.O_RDWR|os.O_CREATE, 0555)
+	f, err := os.OpenFile(filepath.Join(newDir, pleaseExeName), os.O_RDWR|os.O_CREATE, 0555)
 	if err != nil {
 		panic(err)
 	}
@@ -315,10 +321,7 @@ func linkNewFile(config *core.Configuration, file string) {
 	newDir := filepath.Join(config.Please.Location, config.Please.Version.VersionString())
 	globalFile := filepath.Join(config.Please.Location, file)
 	downloadedFile := filepath.Join(newDir, file)
-	if err := fs.RemoveAll(globalFile); err != nil {
-		log.Fatalf("Failed to remove existing file %s: %s", globalFile, err)
-	}
-	if err := os.Symlink(downloadedFile, globalFile); err != nil {
+	if err := linkFile(downloadedFile, globalFile); err != nil {
 		log.Fatalf("Error linking %s -> %s: %s", downloadedFile, globalFile, err)
 	}
 	log.Info("Linked %s -> %s", globalFile, downloadedFile)

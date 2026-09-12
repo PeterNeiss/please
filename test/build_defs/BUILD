@@ -18,6 +18,18 @@ filegroup(
 )
 
 filegroup(
+    name = "wine",
+    srcs = ["wine.build_defs"],
+    visibility = ["//test/..."],
+)
+
+filegroup(
+    name = "windows_bundle",
+    srcs = ["windows_bundle.build_defs"],
+    visibility = ["//test/..."],
+)
+
+filegroup(
     name = "base_config",
     srcs = [
         ".plzconfig.e2e",

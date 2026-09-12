@@ -7,6 +7,8 @@ go_library(
         "progress.go",
         "prompt.go",
         "replacements.go",
+        "signals_other.go",
+        "signals_windows.go",
         "suggest.go",
         "winch_other.go",
         "winch_windows.go",
@@ -35,6 +37,8 @@ go_test(
         "flags_test.go",
         "logging_test.go",
     ],
+    # So //test/windows can run this same binary, cross-built, under Wine.
+    visibility = ["//test/windows:all"],
     deps = [
         ":cli",
         "///third_party/go/github.com_stretchr_testify//assert",

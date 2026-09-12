@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	iofs "io/fs"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/thought-machine/please/src/cli/logging"
@@ -167,6 +167,12 @@ func maybeParseSubrepoPackage(state *core.BuildState, subrepoPkg, subrepoSubrepo
 			// When we try and parse a subrepo package, but the BUILD file or directory doesn't exist, return nil so
 			// this gets handled later on, in the same way as when the package does exist but doesn't define the subrepo
 			if errors.Is(err, ErrMissingBuildFile) {
+				// The parse above claimed the right to parse this package, and we are about to
+				// throw its error away, so the claim has to go back. Without this, the next
+				// caller to ask about the same non-existent package blocks forever waiting for
+				// a parse that is never going to happen - and since a package that isn't there
+				// is the normal answer here, that is a hang on an ordinary lookup.
+				state.ReleasePendingParse(label)
 				return nil, nil
 			}
 			return nil, err
@@ -252,7 +258,11 @@ func buildFileName(state *core.BuildState, subrepo *core.Subrepo, fs iofs.FS, pk
 		return "WORKSPACE", ""
 	}
 	for _, buildFileName := range config.Parse.BuildFileName {
-		filename := filepath.Join(pkgName, buildFileName)
+		// path, not filepath: this is an io/fs path, which is always slash-separated whatever
+		// the host OS. filepath.Join would produce a backslash on Windows and iofs.Stat would
+		// then look for a single file whose name contains one, so no package below the top
+		// level would ever be found.
+		filename := path.Join(pkgName, buildFileName)
 		if info, err := iofs.Stat(fs, filename); err == nil && !info.IsDir() {
 			return filename, pkgName
 		}

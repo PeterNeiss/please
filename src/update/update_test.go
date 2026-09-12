@@ -31,8 +31,13 @@ func (*fakeLogBackend) Log(level logging.Level, calldepth int, rec *logging.Reco
 }
 
 func TestVerifyNewPlease(t *testing.T) {
-	assert.True(t, verifyNewPlease("src/please", version.PleaseVersion))
-	assert.False(t, verifyNewPlease("src/please", "wibble"))
+	// Windows decides what it can run by extension, so the binary is named with one there.
+	please := "src/please"
+	if runtime.GOOS == "windows" {
+		please += ".exe"
+	}
+	assert.True(t, verifyNewPlease(please, version.PleaseVersion))
+	assert.False(t, verifyNewPlease(please, "wibble"))
 	assert.False(t, verifyNewPlease("wibble", version.PleaseVersion))
 }
 
@@ -66,7 +71,9 @@ func TestDownloadNewPlease(t *testing.T) {
 	c := makeConfig("downloadnewplease")
 	downloadPlease(c, false, true)
 	// Should have written new file
-	assert.True(t, core.PathExists(filepath.Join(c.Please.Location, c.Please.Version.String(), "please")))
+	// pleaseExeName rather than "please": the downloaded binary needs the extension on Windows
+	// or nothing will run it.
+	assert.True(t, core.PathExists(filepath.Join(c.Please.Location, c.Please.Version.String(), pleaseExeName)))
 	// Should not have written this yet though
 	assert.False(t, core.PathExists(filepath.Join(c.Please.Location, "please")))
 	// Panics because it's not a valid .tar.gz

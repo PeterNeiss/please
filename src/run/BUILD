@@ -1,6 +1,10 @@
 go_library(
     name = "run",
-    srcs = ["run_step.go"],
+    srcs = [
+        "env_other.go",
+        "env_windows.go",
+        "run_step.go",
+    ],
     pgo_file = "//:pgo",
     visibility = ["PUBLIC"],
     deps = [
@@ -17,11 +21,22 @@ go_library(
 go_test(
     name = "run_test",
     srcs = ["run_test.go"],
-    data = ["test_data"],
+    data = [":run_test_data"],
+    # So //test/windows can run this same binary, cross-built, under Wine.
+    visibility = ["//test/windows:all"],
     deps = [
         ":run",
         "///third_party/go/github.com_stretchr_testify//assert",
+        "///third_party/go/github.com_stretchr_testify//require",
         "//src/core",
         "//src/process",
     ],
+)
+
+# Exposed so //test/windows can put it beside the test binary when running it under Wine.
+filegroup(
+    name = "run_test_data",
+    srcs = ["test_data"],
+    test_only = True,
+    visibility = ["//test/windows:all"],
 )

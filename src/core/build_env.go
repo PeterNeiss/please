@@ -80,6 +80,7 @@ func BuildEnvironment(state *BuildState, target *BuildTarget, tmpDir string) Bui
 	env["TMPDIR"] = tmpDir
 	env["OUTS"] = strings.Join(outEnv, " ")
 	env["HOME"] = tmpDir
+	setPlatformTmpEnv(env, tmpDir)
 	// Set a consistent hash seed for Python. Important for build determinism.
 	env["PYTHONHASHSEED"] = "42"
 
@@ -132,6 +133,7 @@ func BuildEnvironment(state *BuildState, target *BuildTarget, tmpDir string) Bui
 		env["BINDIR"] = filepath.Join(RepoRoot, BinDir)
 	}
 
+	env.normalisePathSeparators()
 	return withUserProvidedEnv(target, env)
 }
 
@@ -164,6 +166,7 @@ func TestEnvironment(state *BuildState, target *BuildTarget, testDir string, run
 	env["TMP_DIR"] = testDir
 	env["TMPDIR"] = testDir
 	env["HOME"] = testDir
+	setPlatformTmpEnv(env, testDir)
 	env["TEST_ARGS"] = strings.Join(state.TestArgs, ",")
 	env["RESULTS_FILE"] = resultsFile
 	// We shouldn't really have specific things like this here, but it really is just easier to set it.
@@ -190,6 +193,7 @@ func TestEnvironment(state *BuildState, target *BuildTarget, testDir string, run
 	if len(state.TestArgs) > 0 {
 		env["TESTS"] = strings.Join(state.TestArgs, " ")
 	}
+	env.normalisePathSeparators()
 	return withUserProvidedEnv(target, env)
 }
 
@@ -204,6 +208,7 @@ func RunEnvironment(state *BuildState, target *BuildTarget, inTmpDir bool) Build
 		env["OUT"] = resolveOut(outEnv[0], ".", false)
 	}
 
+	env.normalisePathSeparators()
 	return withUserProvidedEnv(target, env)
 }
 
@@ -213,6 +218,7 @@ func ExecEnvironment(state *BuildState, target *BuildTarget, execDir string) Bui
 	env["TMP_DIR"] = execDir
 	env["TMPDIR"] = execDir
 	env["HOME"] = execDir
+	setPlatformTmpEnv(env, execDir)
 	// This is used by programs that use display terminals for correct handling
 	// of input and output in the terminal where the program is run.
 	env["TERM"] = os.Getenv("TERM")
@@ -228,6 +234,7 @@ func ExecEnvironment(state *BuildState, target *BuildTarget, execDir string) Bui
 		}
 	}
 
+	env.normalisePathSeparators()
 	return withUserProvidedEnv(target, env)
 }
 
@@ -350,7 +357,10 @@ func toolPath(state *BuildState, tool BuildInput, abs bool) string {
 			entryPoint = o.Annotation
 		}
 		path := state.Graph.TargetOrDie(label).toolPath(abs, entryPoint)
-		if !strings.Contains(path, "/") {
+		// A bare filename is made explicit so the shell runs it rather than searching PATH.
+		// Check both separators: on Windows the path may still contain backslashes at this
+		// point, and treating one as a bare name yields nonsense like "./C:\dir\tool.exe".
+		if !strings.ContainsRune(path, '/') && !strings.ContainsRune(path, os.PathSeparator) {
 			path = "./" + path
 		}
 		return path
