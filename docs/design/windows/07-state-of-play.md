@@ -13,14 +13,14 @@ binary linked against it. Python works too: a `python_test` and a `python_binary
 for Windows and run there, and so does an `sh_binary`, as a `.cmd` with its payload appended.
 The release is a `.zip` containing `please.exe`, `busybox.exe`, `build_langserver.exe` and a
 `plz.cmd` shim; extracting it and running `plz.cmd` builds a genrule with no configuration at
-all. Built with `bundled-plugins` set it also carries all four plugins and the helper tools, and
-then builds an `sh_binary` with the network taken away — see `08-offline-release.md`.
+all.
 
-Test coverage on Linux is unchanged and green. Coverage *of Windows behaviour* is 33 targets and
-872 tests under Wine, run by a blocking CI job and by `./test.sh` as a third pass. Seven of those
+Test coverage on Linux is unchanged and green. Coverage *of Windows behaviour* is 34 targets and
+873 tests under Wine, run by a blocking CI job and by `./test.sh` as a third pass. Eight of those
 targets only exist when a local plugin checkout is configured — see below.
 
-**And 800 of those tests now run on a real Windows machine.** A blocking GitHub Actions job
+**And 809 of those tests now run on a real Windows machine, with no Windows-specific skips
+left.** The two that still skip there are skipped on every platform and always were. A blocking GitHub Actions job
 cross-builds them on Linux and runs them on `windows-latest`, alongside probes that build a repo
 with the release zip, clean and rebuild it five times, and build at a long path. That job is the
 only thing anywhere that is not taking Wine's word for it.
@@ -29,32 +29,31 @@ only thing anywhere that is not taking Wine's word for it.
 |---|---|---|
 | M0–M3, M6 | baseline, OS layer, paths, shell, Wine harness | done |
 | M4 | release pipeline | done; `arcat` is built from source rather than downloaded |
-| M4a | offline release zip | done, for internal use — see `08-offline-release.md` |
-| M5 | C++ / cc-rules | done bar `cc_test`, which is blocked upstream |
+| M5 | C++ / cc-rules | done, `cc_test` included |
 | M7 | sandboxing | decided against, documented |
 | M8 | plugins | go, cc, shell, python all done in local clones |
-| M9 | native Windows CI and GA | CI done and blocking; GA not started |
+| M9 | native Windows CI and GA | done — 18.0.0 |
 
 ## The five repos
 
 | Repo | Branch | Head |
 |---|---|---|
-| `~/code/please` | `wine` | 60 commits ahead of `master` |
+| `~/code/please` | `wine` | merged to `master` on the fork |
 | `~/code/go-rules` | `windows` | don't double the `.exe` |
 | `~/code/cc-rules` | `windows` | emit an import library |
 | `~/code/shell-rules` | `windows` | build an `sh_binary` as a `.cmd` |
 | `~/code/python-rules` | `windows` | build a `.pex` Windows can run |
 
-The plugin clones are branched at the tag `plugins/BUILD` pins, not at `master`. We have no push
-access to any of them, so nothing is upstreamed; the branches are the deliverable for now.
+The plugin clones are branched at the tag `plugins/BUILD` used to pin, not at `master`. There is
+no push access to any of the *upstream* repos, so nothing is upstreamed, but all five are pushed
+to forks at `PeterNeiss/{please,go-rules,cc-rules,shell-rules,python-rules}`, and `plugins/BUILD`
+now downloads the four plugins from there, pinned to commit SHAs. The local checkouts are no
+longer wired into anything: `.plzconfig.local` is inert and can be deleted.
 
-`.plzconfig.local` (gitignored) selects the local checkouts through `[buildconfig]` keys —
-`go-rules-path` and friends, plus `bundled-plugins` to put them in the release. Delete it to go back to the pinned downloads. Both directions are
-verified, but they are not equivalent any more. Six Wine tests are only *defined* when the
-matching checkout is configured, because no released plugin has the fix each one tests: two pex
-tests behind `python-rules-path`, the DLL test behind `cc-rules-path`, the `sh_binary` test
-behind `shell-rules-path`, and the three offline-release tests behind `bundled-plugins`. `//test/export:...` fails while `.plzconfig.local` is present at all,
-for an unrelated reason — see below.
+Every Wine test is now unconditional. Eight of them used to exist only when a local checkout was
+configured — two pex tests, the DLL test, the `cc_test`, the `sh_binary` test — because no
+plugin anyone could download carried the fix each one covers. They run in CI now, on every
+change, which is where they were always meant to run.
 
 ## Environment
 
@@ -75,34 +74,33 @@ for an unrelated reason — see below.
 
 In rough order of value.
 
-1. **Work through what the native job has not reached.** `exec_test` had five tests pass and
-   then hang before the repo-root fix, so nothing after `TestCommandMountNotSandboxed` in that
-   binary has ever run on Windows. Console behaviour and Ctrl-C need a machine with a real
-   console session, which a CI step does not have.
-2. **`cc_test` is blocked upstream of us** — `UnitTest++` as packaged needs its `Win32/` sources
-   to compile at all. It is the last thing in M5.
-3. **`sh_test` cannot take an `sh_binary` as its `src` on Windows.** It copies whatever it is
+1. **`sh_test` cannot take an `sh_binary` as its `src` on Windows.** It copies whatever it is
    given to `<name>.sh` and hands that to a shell, and a `.cmd` is not a shell script. The
-   plugin's own tests are written that way, so they are the thing to fix it against.
-4. **Bump `plugins/BUILD`** once the plugin branches are published somewhere. In the same change,
-   delete everything this repo carries because it pins plugins without the fixes: the
-   `out = "please.exe" if is_platform(...)` workarounds in `src/BUILD.plz` and
-   `//tools/build_langserver`, the `PexTool` and `defaultldflags` lines in
-   `.plzconfig_windows_amd64`, the `CONFIG.get(...)` conditions around the pex, DLL and
-   `sh_binary` tests in `//test/windows`, and the whole of `08-offline-release.md`'s machinery.
-5. **`.pyd` extension modules in a pex.** `SoImport` writes one to a `NamedTemporaryFile` and
+   plugin's own tests are written that way, so they are the thing to fix it against. The
+   smallest real functional gap left.
+2. **Ctrl-Break is delivered but never verified.** `KillProcess` sends one, waits 30ms, then
+   terminates the job object. `TestKillsProcessTree` passes natively, but it only asserts a
+   grandchild died, which terminating the job achieves either way — so the graceful path could
+   be dead code on Windows and no test would notice.
+
+   Harder than it looks, which is why it is still here. The window is 30ms: `KillProcess` sends
+   the break, waits that long, then terminates the job regardless. A test that asserts the child
+   shut down gracefully is racing that timer on a CI machine, and a flaky test in a blocking job
+   is worse than no test. Either call `killProcessTree` directly and wait generously, which
+   tests the delivery without the timer, or widen the window and say why.
+3. **`.pyd` extension modules in a pex.**
+   `SoImport` writes one to a `NamedTemporaryFile` and
    loads it while the handle is still open, which Windows does not allow. Only bites a pex
    containing native wheels.
-6. **`plz run` and `plz debug` on a Windows target** are untested. So is `plz cover`, whose
-   coverage paths come back from the Python side with backslashes in them. `plz run` on an
-   `sh_binary` is the interesting case: Go's `os/exec` launches a `.cmd` happily under Wine,
-   which is the part that was in doubt, and is exactly the kind of answer Wine gives more
-   readily than Windows does.
+4. **`plz debug` and `plz cover` on a Windows target** are untested. `plz cover` has one
+   concrete suspicion against it: coverage paths come back from the Python side with
+   backslashes in them. Both are unknowns rather than known defects, so the native job is
+   likely to find them faster than guessing will.
 
-Blocked on push access we do not have: publishing `windows_amd64` releases of `arcat`,
-`please_go`, `please_cc`, and a `please_pex` of any platform carrying the Windows preamble.
-**None of that blocks cross-building** — tools resolve to the host under `--arch` — it blocks a
-*native* Windows `plz` only.
+Nothing is blocked on access any more. `arcat` is built from source in this repo, and
+`please_go`, `please_cc` and `please_pex` all have `windows_amd64` releases published from the
+forks, so a native Windows `plz` has everything it needs to download. What remains is upstream
+adoption, which is a matter of someone merging rather than of permission.
 
 ## Things that will bite you again
 
@@ -130,14 +128,14 @@ Each of these has already cost time once.
 - **Never run a cross-built test binary by hand in the source tree.** Under `plz test` they get a
   sandboxed temp directory; run from the repo root they operate on the repo. Doing this once
   deleted the whole of `test/`.
-- **`//test/export:...` fails whenever `.plzconfig.local` is present.** The local checkouts are
-  registered with `subrepo()` rather than `plugin_repo()`, so there is no target for `plz export`
-  to follow and the exported repo has no `plugins/BUILD`. Nothing to do with the port; move the
-  file aside before believing an export failure.
 - **A build output is read-only, and on Windows that means it cannot be replaced at all.**
   Unpacking an archive of build outputs over a previous unpacking of itself therefore fails,
   and tools tend to report it on stderr and carry on with the stale copy. `sh_binary` hit this;
   anything else that unpacks build outputs beside themselves will too.
+- **A skip hides a bug better than a missing test does.** Deleting two has now found two real
+  failures that Wine had passed for months. `plz run` handed `cmd.exe` a forward-slashed path,
+  which it reads as a switch; and every `link:` label silently became a warning. Both were
+  behind `runtime.GOOS == "windows"` skips that looked reasonable when they were written.
 - **`filepath.Split` does not terminate a walk on Windows.** Trimming the separator off `C:\`
   leaves `C:`, and splitting that returns it unchanged, so a loop that stops at an empty string
   never stops. Compare each step against the previous one instead. This hung every `plz` run
@@ -159,7 +157,7 @@ Each of these has already cost time once.
   to the host, so a `.cmd` that still has a Unix shebang on it runs under `/bin/sh` and passes
   the test you wrote to catch exactly that. Go through `cmd.exe` explicitly.
 - **`plz update` on Windows fetches only the bare binary, not the zip.** Everything else the
-  release ships - busybox, and anything `08-offline-release.md` adds beside it - stays at the
+  release ships - busybox, arcat, and the plz.cmd shim - stays at the
   version it was first installed at, silently, getting staler with each update. Nothing has
   ever exercised this.
 - **Python under Wine needs its output to be a pipe.** Wine's console emulation hands it handles

@@ -347,7 +347,11 @@ Design: `03-cc-toolchain.md`. Repo: `please-build/cc-rules`.
 - [ ] **`please_cc` needs a `windows_amd64` release.** `tools/BUILD` fetches it as a prebuilt
       binary with a pinned hash per platform. Not a blocker under Axis 2, where tools build for
       the Linux host, but required for a native Windows plz
-- [ ] **`UnitTest++` does not compile for Windows** as packaged — needs its `Win32/` sources.
+- [x] **`cc_test` works on Windows.** Recorded as blocked on `UnitTest++` needing its `Win32/`
+      sources; that was never true. The sources were selected and then compiled with the host
+      toolchain, because a target inside a plugin does not see the using repo's plugin config.
+      One portability fix went with it: the test main called `unsetenv`, which Windows has no
+      such function for. Guarded by `//test/windows:cc_test_test`
       Blocks `cc_test`, not `cc_library`/`cc_binary`
 - [ ] Upstream PR; bump `plugins/BUILD` revision
 
@@ -581,6 +585,12 @@ the right shape.
       `//tools/build_langserver` can be deleted and `please.exe` still comes out with the right
       name. **They are deliberately still in the tree**, because this repo pins the unfixed
       upstream plugin; drop them in the same change that bumps `plugins/BUILD`
+- [x] **go plugin — a `windows_amd64` `please_go` release, published from the fork.** Upstream
+      publishes five platforms and not Windows, so a native Windows plz could not build a Go
+      target at all. Only that one architecture is redirected to the fork; everything else
+      still comes from please-build. The download needs an explicit `out`, because the asset
+      name carries the version and platform and so has no extension in PATHEXT. The same was
+      done for `please_cc` and `please_pex`
 - [ ] go plugin — `windows_amd64` arch for its own release. `tools/please_go:bootstrap` runs
       `go build ... && mv please_go $OUT`, which fails where `go build` writes `please_go.exe`,
       and hardcodes `TMPDIR=/tmp`. Native-Windows only
@@ -703,10 +713,13 @@ the right shape.
       with a date. Two items remain out of reach from a CI step: console behaviour, because a
       step's stdout is a pipe so the interactive display never engages, and Ctrl-C, which needs
       a console the sender is attached to. Both need a machine with a real session
-- [ ] `get_plz.sh` Windows equivalent
-- [ ] `README.md`, `docs/faq.html`
-- [ ] `docs/milestones/<version>.html` announcement (fragment HTML — see the existing files)
-- [ ] `VERSION` bump + `ChangeLog` entry
+- [x] **`get_plz.ps1`**, served and signed from the same bucket as `get_plz.sh` and run the
+      same way: `irm https://get.please.build/get_plz.ps1 | iex`
+- [x] **`README.md` and `docs/faq.html`.** The FAQ said Windows was not supported natively;
+      it now says what is supported, and names the two things that behave differently - no
+      sandbox, and virus scanners holding files open
+- [x] **`docs/milestones/18.0.0.html`**
+- [x] **`VERSION` 18.0.0 + `ChangeLog` entry**
 
 ## Risk register
 
