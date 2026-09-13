@@ -152,6 +152,15 @@ wine_plz_test(
     repo = "smoke_repo",
 )
 
+# A shell script as a build tool: the genrule codelab's word count, written the Unix way. Windows has
+# no #! mechanism; this is the evidence that busybox, running the build action, reads the line itself.
+wine_plz_test(
+    name = "shebang_tool_test",
+    cmd = "build //:words",
+    expected_output = {"plz-out/gen/words.words": "expected_words.txt"},
+    repo = "smoke_repo",
+)
+
 # A .pex is a zip with an executable stub in front of it, so on Windows it needs a Windows stub;
 # the one please_pex prepends everywhere else is an ELF binary and will not run at all. This
 # checks the whole chain - the preamble runs, finds an interpreter, and Python imports the test

@@ -19,3 +19,11 @@ for name, plugin, revision in PLUGINS:
         plugin = plugin,
         revision = revision,
     )
+
+# This file as data, so //src/plzinit can check that `plz init plugin` pins the same revisions.
+filegroup(
+    name = "build_file",
+    srcs = ["BUILD"],
+    test_only = True,
+    visibility = ["//src/plzinit:all"],
+)

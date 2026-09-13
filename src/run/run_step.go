@@ -177,6 +177,9 @@ func run(ctx context.Context, state *core.BuildState, label core.AnnotatedOutput
 	// two switches, and it says so. Wine's cmd is more forgiving, which is why this only
 	// showed up on a real machine.
 	args[0] = filepath.FromSlash(args[0])
+	// Windows cannot start a #! script by name at all; an sh or bash one runs through the shell
+	// build actions use instead. Everywhere else this leaves args alone.
+	args = withScriptShell(state.Config, args)
 
 	log.Info("Running target %s...", strings.Join(args, " "))
 	output.SetWindowTitle("plz run: " + strings.Join(args, " "))

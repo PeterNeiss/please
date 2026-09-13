@@ -27,5 +27,6 @@ func ExplainUnrunnable(path string) string {
 	if info, err := os.Stat(path); err != nil || info.IsDir() {
 		return ""
 	}
-	return "\n" + path + " exists, but its name has no extension Windows will run; something has to produce it as " + path + ExeSuffix + " instead"
+	return "\n" + path + " exists, but its name has no extension Windows will run; something has to produce it as " + path + ExeSuffix + " instead" +
+		"\n(plz run does start a #!/bin/sh or #!/bin/bash script through the bundled shell, but no other interpreter's)"
 }

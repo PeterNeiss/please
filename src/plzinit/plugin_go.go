@@ -20,8 +20,12 @@ type goVersionResp = []struct {
 	Stable  bool   `json:"stable"`
 }
 
-// getLatestGoVersion fetches the latest stable Go version from the Go website
-func getLatestGoVersion() (string, error) {
+// getLatestGoVersion fetches the latest stable Go version. A variable so that tests can run
+// initGo without the network.
+var getLatestGoVersion = fetchLatestGoVersion
+
+// fetchLatestGoVersion fetches the latest stable Go version from the Go website
+func fetchLatestGoVersion() (string, error) {
 	resp, err := http.Get("https://golang.org/dl/?mode=json")
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch Go versions: %w", err)
@@ -83,7 +87,7 @@ func initGo() (map[string]string, error) {
 
 	stdRule := "//third_party/go:std"
 	if rules := buildFile.Rules("go_stdlib"); len(rules) == 1 {
-		toolchainRule = fmt.Sprintf("//third_party/go:%v", rules[0].Name())
+		stdRule = fmt.Sprintf("//third_party/go:%v", rules[0].Name())
 	} else if !hasRule(rules, "std") {
 		buildFile.Stmt = append(buildFile.Stmt, stdLib("std"))
 	}

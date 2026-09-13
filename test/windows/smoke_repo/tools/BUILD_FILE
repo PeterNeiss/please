@@ -1,0 +1,8 @@
+# The genrule codelab's word-count tool, written the way it writes it: a #!/bin/bash script with no
+# extension, marked binary.
+filegroup(
+    name = "wc",
+    srcs = ["wc.sh"],
+    binary = True,
+    visibility = ["PUBLIC"],
+)

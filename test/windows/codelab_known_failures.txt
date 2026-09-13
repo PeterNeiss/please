@@ -37,12 +37,6 @@ puku::initialising-your-project-and-running-puku-with-please/b12.1
 # publishes no windows_amd64 release. Every later step of the codelab depends on it.
 puku::adding-and-updating-modules/b3.1
 
-# plz run //tools:wc runs tools/wc.sh, a filegroup with binary = True holding a #!/bin/bash script.
-# Windows runs nothing by its shebang. The first native run failed with "%1 is not a valid Win32
-# application", and Please's own message says the file needs an extension Windows will run. The
-# rest of the codelab builds on this tool, so it is blocked behind it.
-genrule::managing-tools/b4.1
-
 # The codelab clones thought-machine/please-codelabs, whose getting_started_go uses the upstream Go
 # plugin. On the first native run its tools/BUILD had no please_go target, there being no
 # windows_amd64 release, and its go_toolchain requested go1.20.windows-amd64.tar.gz, a 404. The
