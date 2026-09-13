@@ -277,7 +277,7 @@ go_test(
     srcs = ["greetings_test.go"],
     deps = [
         ":greetings",
-        "//third_party/go:assert",
+        "//third_party/go:testify",
     ],
     external = True,
 )
