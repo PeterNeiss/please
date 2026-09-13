@@ -33,6 +33,8 @@ go_intro::setting-up-your-toolchain/b2                   file          .plzconfi
 go_intro::setting-up-your-toolchain/b3                   illustration  /usr/local/bin:/usr/bin:/bin
 go_intro::setting-up-your-toolchain/b4                   ignore        [Build]
 go_intro::setting-up-your-toolchain/b5                   command       GODEBUG="installgoroot=all" go install std
+go_intro::setting-up-your-toolchain/b6                   ignore        [Build]
+go_intro::setting-up-your-toolchain/b7                   command       $env:GODEBUG = "installgoroot=all"; go install std
 go_intro::hello-world/b1                                 file          src/main.go
 go_intro::hello-world/b2                                 file          src/BUILD
 go_intro::hello-world/b3                                 command       plz run //src:main
@@ -50,7 +52,7 @@ go_intro::testing-our-code/b3                            transcript    $ plz tes
 go_intro::testing-our-code/b4                            file          src/greetings/greetings_test.go
 go_intro::testing-our-code/b5                            file          src/greetings/BUILD
 go_intro::testing-our-code/b6                            transcript    $ plz test //src/...
-go_intro::third-party-dependencies/b1                    transcript    $ plz run ///go//tools:please_go -- get github.com/stretchr/...
+go_intro::third-party-dependencies/b1                    transcript    $ go get github.com/stretchr/testify@v1.8.2
 go_intro::third-party-dependencies/b2                    file          third_party/go/BUILD
 go_intro::third-party-dependencies/b3                    file          src/greetings/greetings_test.go
 go_intro::third-party-dependencies/b4                    file          src/greetings/BUILD
@@ -85,7 +87,7 @@ k8s::please-deploy/b1                                    command       plz run s
 k8s::please-deploy/b2                                    file          .plzconfig
 k8s::please-deploy/b3                                    command       plz deploy //hello_service/...
 k8s::docker-build-and-build-systems/b1                   illustration  docker_image(
-plz_query::setting-up/b1                                 command       git clone https://github.com/thought-machine/please-codelabs
+plz_query::setting-up/b1                                 command       git clone https://github.com/PeterNeiss/please-codelabs
 plz_query::setting-up/b2                                 illustration  Cloning into 'please-codelabs'...
 plz_query::setting-up/b3                                 command       cd please-codelabs/getting_started_go
 plz_query::finding-dependencies-of-a-target/b1           transcript    $ plz query deps //src/greetings:greetings_test
@@ -113,7 +115,9 @@ puku::initialising-your-project-and-running-puku-with-please/b8 illustration  /u
 puku::initialising-your-project-and-running-puku-with-please/b9 command       which go
 puku::initialising-your-project-and-running-puku-with-please/b10 ignore        [Build]
 puku::initialising-your-project-and-running-puku-with-please/b11 ignore        [Build]
-puku::initialising-your-project-and-running-puku-with-please/b12 command       GODEBUG="installgoroot=all" go install std
+puku::initialising-your-project-and-running-puku-with-please/b12 file          .plzconfig
+puku::initialising-your-project-and-running-puku-with-please/b13 command       GODEBUG="installgoroot=all" go install std
+puku::initialising-your-project-and-running-puku-with-please/b14 command       $env:GODEBUG = "installgoroot=all"; go install std
 puku::adding-and-updating-modules/b1                     file          src/hello/hello.go
 puku::adding-and-updating-modules/b2                     command       go get github.com/google/uuid
 puku::adding-and-updating-modules/b3                     command       plz puku sync -w
@@ -121,9 +125,11 @@ puku::adding-and-updating-modules/b4                     file          src/hello
 puku::adding-and-updating-modules/b5                     command       plz puku fmt //src/hello
 puku::adding-and-updating-modules/b6                     command       plz run //src/hello
 puku::adding-and-updating-modules/b7                     command       GOTOOLCHAIN=local go get github.com/google/uuid@v1.6.0
-puku::adding-and-updating-modules/b8                     command       GOTOOLCHAIN=local go get -u github.com/google/uuid
-puku::adding-and-updating-modules/b9                     command       go get <module-name>
-puku::adding-and-updating-modules/b10                    command       go get <module-name>
+puku::adding-and-updating-modules/b8                     command       $env:GOTOOLCHAIN = "local"; go get github.com/google/uuid@v1...
+puku::adding-and-updating-modules/b9                     command       GOTOOLCHAIN=local go get -u github.com/google/uuid
+puku::adding-and-updating-modules/b10                    command       $env:GOTOOLCHAIN = "local"; go get -u github.com/google/uuid
+puku::adding-and-updating-modules/b11                    command       go get <module-name>
+puku::adding-and-updating-modules/b12                    command       go get <module-name>
 puku::stop-a-module-from-updating/b1                     command       go mod edit -exclude github.com/example/module@v2.0.0
 puku::stop-a-module-from-updating/b2                     command       go mod edit -dropexclude github.com/example/module@v2.0.0
 puku::stop-a-module-from-updating/b3                     command       go mod edit -replace github.com/example/module=github.com/ex...
@@ -138,8 +144,9 @@ puku::using-new-modules/b3                               illustration  go_librar
 puku::using-new-modules/b4                               command       plz puku watch //src/...
 python_intro::initialising-your-project/b1               command       mkdir getting_started_python && cd getting_started_python
 python_intro::initialising-your-project/b2               ignore        [build]
-python_intro::initialising-your-project/b3               transcript    $ tree -a
-python_intro::initialising-your-project/b4               illustration  [parse]
+python_intro::initialising-your-project/b3               file          .plzconfig
+python_intro::initialising-your-project/b4               transcript    $ tree -a
+python_intro::initialising-your-project/b5               illustration  [parse]
 python_intro::hello-world/b1                             file          src/main.py
 python_intro::hello-world/b2                             file          src/BUILD
 python_intro::hello-world/b3                             transcript    $ plz run //src:main

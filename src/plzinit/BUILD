@@ -10,6 +10,7 @@ go_library(
     pgo_file = "//:pgo",
     visibility = ["PUBLIC"],
     deps = [
+        "///third_party/go/github.com_coreos_go-semver//semver",
         "///third_party/go/github.com_please-build_buildtools//build",
         "///third_party/go/github.com_please-build_gcfg//ast",
         "//src/assets",
@@ -24,9 +25,15 @@ go_library(
 
 go_test(
     name = "plzinit_test",
-    srcs = ["init_test.go"],
+    srcs = [
+        "init_test.go",
+        "plugin_go_test.go",
+        "plugins_test.go",
+    ],
+    data = ["//plugins:build_file"],
     deps = [
         ":plzinit",
+        "///third_party/go/github.com_please-build_buildtools//build",
         "///third_party/go/github.com_stretchr_testify//assert",
         "///third_party/go/github.com_stretchr_testify//require",
         "//src/fs",

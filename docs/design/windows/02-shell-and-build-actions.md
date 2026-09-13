@@ -105,6 +105,15 @@ Present in busybox-w64 and used by Please's rules: `sh`, `ash`, `bash`, `find`, 
 `xargs`, `cut`, `which`, `env`, `tar`, `gzip`, `unzip`, `head`, `tail`, `wc`, `tee`, `touch`,
 `ln`, `readlink`, `realpath`, `grep`, `awk`, `flock`, `install`, `make`.
 
+**Applets as tools.** Inside a build action an applet is found by the shell. A *tool* is different:
+`tools = {"WC": ["wc"]}` is resolved on the build path before anything runs, and hashed as a file.
+Windows has no directory of such tools for that path to hold, so a bare tool name found nowhere
+on it falls back to busybox, which picks its applet from the name it is started as: Please makes a
+copy (a hard link where it can) named `wc.exe` under `plz-out/busybox/<key>/` and returns that. The
+key covers busybox's path, size and mtime, and the tool hash is busybox's content, so an upgrade
+rebuilds what uses it. The genrule codelab's `word_count` is the case that found this. See
+`src/core/applet.go`.
+
 **Gaps:**
 
 1. **`pkg-config` is absent.** No applet, no shim. Documented as unsupported on Windows —

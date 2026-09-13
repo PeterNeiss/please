@@ -2,6 +2,7 @@ package plz
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -67,4 +68,13 @@ func TestStripHost(t *testing.T) {
 			assert.Equal(t, core.ParseBuildLabel(test.Expected, ""), actual)
 		})
 	}
+}
+
+// The walk for //pkg/... returns paths in the platform's own form. Built with filepath.Join, so the
+// native Windows run and the Wine run check the backslash case this used to panic on.
+func TestPackageNameOf(t *testing.T) {
+	assert.Equal(t, "src", packageNameOf(filepath.Join("src", "BUILD"), ""))
+	assert.Equal(t, "src/greetings", packageNameOf(filepath.Join("src", "greetings", "BUILD"), ""))
+	assert.Equal(t, "", packageNameOf("BUILD", ""))
+	assert.Equal(t, "pkg", packageNameOf(filepath.Join("plz-out", "subrepos", "x", "pkg", "BUILD"), filepath.Join("plz-out", "subrepos", "x")))
 }

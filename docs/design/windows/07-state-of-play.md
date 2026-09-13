@@ -1,6 +1,6 @@
 # State of Play
 
-Status: **Living document** · Last updated: 2026-09-12
+Status: **Living document** · Last updated: 2026-09-13
 
 Where the Windows port actually is, and what to pick up next. `06-milestones.md` is the
 per-milestone tracker with the reasoning; this is the short version for someone starting cold.
@@ -25,15 +25,18 @@ cross-builds them on Linux and runs them on `windows-latest`, alongside probes t
 with the release zip, clean and rebuild it five times, and build at a long path. That job is the
 only thing anywhere that is not taking Wine's word for it.
 
-**The codelabs are now replayed there as well, and only one can be followed to its end.** Nothing
-had ever executed a codelab on any platform. `using_plugins` runs through; `genrule` gets as far
-as its custom tool, a `#!/bin/bash` script Windows cannot run; every codelab that builds Go or
-Python stops at its first build, and `github_actions` has nothing to run. The causes are upstream
-plugin tools and Puku with no Windows release, a Go 1.20 toolchain requested as a `.tar.gz` that
-Windows releases never are, Python absent from the empty default build path, and bash syntax. One
-cause is not Windows at all: the Go codelabs write a `third_party/go/BUILD` that drops the
-`go_stdlib` `plz init plugin go` now generates. Each is in `test/windows/codelab_known_failures.txt`
-with the log line behind it. See Loop D in `05-testing-strategy.md`.
+**The codelabs are replayed there as well, and every one but k8s runs to its end.** Nothing had
+ever executed a codelab on any platform. The blocking `codelabs` job now passes 139 steps with a
+single known failure, k8s, which is outside the Windows work (`github_actions` has nothing to
+run). Getting there was mostly product fixes, found one step at a time as each unblocked the next:
+`plz init plugin` pinning the forks; Windows releases of please_go, please_pex and Puku; `plz run`
+of shebang scripts; a bare tool name like `wc` running as a busybox applet; arcat and please_pex
+writing empty `__init__.py` files over real ones; please_go's package info and the stdlib
+importconfig both mangling backslash paths; and an uncached pex that could neither lock its cache
+without pywin32 nor delete what it extracted. Where the text was the problem the codelab changed:
+Windows forms beside the Unix ones, `go get` for the `please_go get` go-rules removed, a
+`third_party/go/BUILD` that keeps its toolchain, and a label the plz query repo actually defines.
+See Loop D in `05-testing-strategy.md`.
 
 | # | Milestone | State |
 |---|---|---|
@@ -43,21 +46,23 @@ with the log line behind it. See Loop D in `05-testing-strategy.md`.
 | M7 | sandboxing | decided against, documented |
 | M8 | plugins | go, cc, shell, python all done in local clones |
 | M9 | native Windows CI and GA | done — 18.0.0 |
-| M10 | The codelabs, replayed on Windows | done; findings recorded, docs decision open |
+| M10 | The codelabs, replayed on Windows | done; all but k8s run on `windows-latest` |
 
-## The five repos
+## The repos
 
 | Repo | Branch | Head |
 |---|---|---|
-| `~/code/please` | `wine` | merged to `master` on the fork |
-| `~/code/go-rules` | `windows` | don't double the `.exe` |
+| `~/code/please` | `codelabs` | PR #4 on the fork, codelabs job green |
+| `~/code/go-rules` | `windows` | please_go 1.24.0-windows.4 |
 | `~/code/cc-rules` | `windows` | emit an import library |
 | `~/code/shell-rules` | `windows` | build an `sh_binary` as a `.cmd` |
-| `~/code/python-rules` | `windows` | build a `.pex` Windows can run |
+| `~/code/python-rules` | `windows` | please_pex 3.0.2-windows.5 |
+| `~/code/puku` | `windows` | a windows_amd64 release, `/`-joined subrepo names |
+| `~/code/please-codelabs` | `main` | pins the go-rules fork, for the plz query codelab |
 
 The plugin clones are branched at the tag `plugins/BUILD` used to pin, not at `master`. There is
-no push access to any of the *upstream* repos, so nothing is upstreamed, but all five are pushed
-to forks at `PeterNeiss/{please,go-rules,cc-rules,shell-rules,python-rules}`, and `plugins/BUILD`
+no push access to any of the *upstream* repos, so nothing is upstreamed, but all of them are pushed
+to forks at `PeterNeiss/*`, and `plugins/BUILD`
 now downloads the four plugins from there, pinned to commit SHAs. The local checkouts are no
 longer wired into anything: `.plzconfig.local` is inert and can be deleted.
 
@@ -85,16 +90,11 @@ change, which is where they were always meant to run.
 
 In rough order of value.
 
-1. **Decide what to do about the codelabs.** The codelabs job passes only because every failure is
-   listed in `test/windows/codelab_known_failures.txt` with its evidence, and that file is the input
-   to the decision. The largest fixes are not in the prose: `plz init plugin` pointing at plugin
-   releases that exist for Windows, and Go codelabs that do not delete the stdlib it generates. No
-   codelab has been edited.
-2. **`sh_test` cannot take an `sh_binary` as its `src` on Windows.** It copies whatever it is
+1. **`sh_test` cannot take an `sh_binary` as its `src` on Windows.** It copies whatever it is
    given to `<name>.sh` and hands that to a shell, and a `.cmd` is not a shell script. The
    plugin's own tests are written that way, so they are the thing to fix it against. The
    smallest real functional gap left.
-3. **Ctrl-Break is delivered but never verified.** `KillProcess` sends one, waits 30ms, then
+2. **Ctrl-Break is delivered but never verified.** `KillProcess` sends one, waits 30ms, then
    terminates the job object. `TestKillsProcessTree` passes natively, but it only asserts a
    grandchild died, which terminating the job achieves either way — so the graceful path could
    be dead code on Windows and no test would notice.
@@ -104,11 +104,11 @@ In rough order of value.
    shut down gracefully is racing that timer on a CI machine, and a flaky test in a blocking job
    is worse than no test. Either call `killProcessTree` directly and wait generously, which
    tests the delivery without the timer, or widen the window and say why.
-4. **`.pyd` extension modules in a pex.**
+3. **`.pyd` extension modules in a pex.**
    `SoImport` writes one to a `NamedTemporaryFile` and
    loads it while the handle is still open, which Windows does not allow. Only bites a pex
    containing native wheels.
-5. **`plz debug` and `plz cover` on a Windows target** are untested. `plz cover` has one
+4. **`plz debug` and `plz cover` on a Windows target** are untested. `plz cover` has one
    concrete suspicion against it: coverage paths come back from the Python side with
    backslashes in them. Both are unknowns rather than known defects, so the native job is
    likely to find them faster than guessing will.

@@ -1,6 +1,7 @@
 package plz
 
 import (
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -234,14 +235,23 @@ func findOriginalTask(state *core.BuildState, target core.BuildLabel, addToList 
 			}
 		}
 		for filename := range FindAllBuildFiles(state.Config, dir, "") {
-			dirname, _ := filepath.Split(filename)
-			l := core.NewBuildLabel(strings.TrimLeft(strings.TrimPrefix(strings.TrimRight(dirname, "/"), prefix), "/"), "all")
+			l := core.NewBuildLabel(packageNameOf(filename, prefix), "all")
 			l.Subrepo = target.Subrepo
 			state.AddOriginalTarget(l, addToList)
 		}
 	} else {
 		state.AddOriginalTarget(target, addToList)
 	}
+}
+
+// packageNameOf returns the package a BUILD file found on disk belongs to, relative to prefix.
+//
+// The walk returns paths in the platform's own form, and a package name is slash-separated
+// everywhere. On Windows the directory came back as "src\", which only "/" was trimmed from, so
+// `plz test //src/...` panicked with "Invalid package name: src\".
+func packageNameOf(filename, prefix string) string {
+	dirname, _ := path.Split(filepath.ToSlash(filename))
+	return strings.TrimLeft(strings.TrimPrefix(strings.TrimRight(dirname, "/"), filepath.ToSlash(prefix)), "/")
 }
 
 // FindAllBuildFiles finds all BUILD files under a particular path.

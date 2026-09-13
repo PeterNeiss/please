@@ -390,7 +390,10 @@ go_repo(
 
 go_repo(
     module = "github.com/please-build/arcat",
-    patch = ["arcat_windows_rename.patch"],
+    patch = [
+        "arcat_windows_rename.patch",
+        "arcat_windows_init_py.patch",
+    ],
     version = "v1.3.1",
 )
 

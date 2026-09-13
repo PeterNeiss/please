@@ -26,7 +26,7 @@ Legend: ⬜ not started · 🟡 in progress · ✅ done · ⚠️ blocked
 | M7 | Sandboxing parity | 2w | 🟡 | — | — |
 | M8 | Remote execution and plugin parity | 3w | 🟡 | — | — |
 | M9 | Native Windows CI and GA | 2w | ⬜ | — | — |
-| M10 | The codelabs, replayed on Windows | — | 🟡 | — | — |
+| M10 | The codelabs, replayed on Windows | — | ✅ | — | — |
 
 Rough total: 14–15 weeks of focused work. M0–M6 (the C++ vertical slice) is 7–8 weeks.
 
@@ -722,7 +722,7 @@ the right shape.
 - [x] **`docs/milestones/18.0.0.html`**
 - [x] **`VERSION` 18.0.0 + `ChangeLog` entry**
 
-## M10 — The codelabs, replayed on Windows 🟡
+## M10 — The codelabs, replayed on Windows ✅
 
 M9 showed that Please runs on Windows. It said nothing about whether the documentation does, and
 nothing had ever executed a line of the codelabs, on any platform.
@@ -748,9 +748,14 @@ nothing had ever executed a line of the codelabs, on any platform.
       which a plugin section refuses, so the runner now merges key by key. The second run added
       the last entry, a failure that is not Windows at all: the Go codelabs' `third_party/go/BUILD`
       drops the `go_stdlib` that `plz init plugin go` generates
-- [ ] **What to do about the codelabs that cannot work as written.** Deliberately not decided
-      here, and no codelab has been edited. `test/windows/codelab_known_failures.txt` is the
-      record that decision should be taken from
+- [x] **What to do about the codelabs that cannot work as written.** Decided: fix the product
+      wherever that makes a codelab work as written, and edit a codelab only where its text is the
+      problem. `plz init plugin` pins the plugin forks, the plugins' Windows tools are released
+      from them, a bare tool name falls back to a busybox applet, and three codelab passages
+      changed: Windows forms beside the Unix ones, a `go_stdlib` the Go codelab had dropped, and
+      `go get` in place of the `please_go get` go-rules removed. Each fix took its
+      `codelab_known_failures.txt` entry with it; only k8s is left there, and it is outside the
+      Windows work
 
 ## Risk register
 
@@ -769,5 +774,5 @@ nothing had ever executed a line of the codelabs, on any platform.
 | Hash drift invalidates every user's cache | Silent, affects all platforms | `plz hash //...` diff on every M1–M3 PR |
 | `ERROR_SHARING_VIOLATION` on real Windows | Invisible until M9 | Listed explicitly in the M9 issue; design `RemoveAll` and the updater defensively now |
 | arcat platform gate forgotten | `plz.exe` cannot parse anything, discovered late | Called out as a hard gate in M4; it fails at runtime on Windows, not at build time on Linux |
-| `plz init plugin` points at upstream plugins with no Windows tools | Every codelab that installs a plugin fails at its first build | Recorded per step in `codelab_known_failures.txt`. The fix is Windows releases upstream, or `plz init plugin` using the forks; that is a docs and release decision, not taken in M10 |
+| ~~`plz init plugin` points at upstream plugins with no Windows tools~~ | **Materialised, resolved in M10.** Every codelab that installed a plugin failed at its first build | `plz init plugin` pins the forks by commit, with no call to GitHub's API; `plugins_test` checks the pins match `plugins/BUILD` |
 | The codelab replay interprets a block differently from its prose | The check passes or fails for its own reasons rather than the codelab's | Unclassified blocks are fatal; every stanza in `codelab_steps.conf` pins its text with `matches` and carries its reason |

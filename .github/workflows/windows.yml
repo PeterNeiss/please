@@ -167,6 +167,9 @@ jobs:
           if (Get-Command docker -EA SilentlyContinue) {
             "docker OSType = $(docker info --format '{{.OSType}}' 2>$null)" | Tee-Object -Append $env:GITHUB_STEP_SUMMARY
           }
+          # This step only reports. docker info exits non-zero when the daemon is not running, and
+          # the pwsh wrapper fails a step on the last native exit code, so it must not be left set.
+          $global:LASTEXITCODE = 0
       - name: Run the codelabs
         run: |
           ./test/windows/run_codelabs.ps1 `

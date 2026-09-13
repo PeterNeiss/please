@@ -46,6 +46,18 @@ isn't in this path, you will need to add the following to `.plzconfig`:
 path = $YOUR_PYTHON_INSTALL_HERE:/usr/local/bin:/usr/bin:/bin
 ```
 
+On Windows the default path is empty, so Please finds no Python at all until you say where to look. The simplest way is
+to pass your own `PATH` through, which is what `python` resolves against in your terminal:
+
+### `.plzconfig`
+```text
+[build]
+PassEnv = PATH
+```
+
+That makes `PATH` part of what every build depends on, so changing it rebuilds. To list directories instead, give each
+on its own `path =` line with forward slashes, for example `path = C:/Users/you/AppData/Local/Programs/Python/Python312`.
+
 ### So what just happened?
 You will see this has created a number of files in your working folder:
 ```
@@ -270,7 +282,7 @@ package(default_visibility = ["PUBLIC"])
 
 pip_library(
     name = "numpy",
-    version = "1.23.4",
+    version = "1.26.4",
     zip_safe = False, # This is because NumPy has shared object files which can't be linked to them when zipped up
 )
 ```

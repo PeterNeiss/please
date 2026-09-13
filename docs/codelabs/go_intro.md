@@ -116,13 +116,18 @@ Go toolchain with Please.
 ### Recommended: managed toolchain
 
 The simplest way is to let Please manage your toolchain for you. The `go_toolchain()` rule will download the Go 
-toolchain, compiling the standard library if necessary. Simply add the following rule to your project:
+toolchain, and `go_stdlib()` compiles its standard library, which Go no longer ships from 1.20. Simply add the following
+rules to your project:
 
 ### `third_party/go/BUILD`
 ```python
 go_toolchain(
     name = "toolchain",
     version = "1.20",
+)
+
+go_stdlib(
+    name = "std",
 )
 ```
 
@@ -133,6 +138,7 @@ And then configure the Go plugin to use it like so:
 Target = //plugins:go
 ImportPath = github.com/example/module
 GoTool = //third_party/go:toolchain|go
+STDLib = //third_party/go:std
 ```
 
 ### Using Go from the system PATH
@@ -142,7 +148,7 @@ By default, Please will look for Go in the following locations:
 /usr/local/bin:/usr/bin:/bin
 ```
 
-If you have Please installed elsewhere, you must configure the path like so:
+If you have Go installed elsewhere, you must configure the path like so:
 
 ### `.plzconfig`
 ```text
@@ -155,6 +161,19 @@ the path with Please, you must install it. This can be done like so:
 
 ```bash
 GODEBUG="installgoroot=all" go install std
+```
+
+On Windows the default path is empty, so Please finds no Go until you say where to look. The simplest way is to pass
+your own `PATH` through, and to set the variable the PowerShell way:
+
+### `.plzconfig`
+```text
+[Build]
+PassEnv = PATH
+```
+
+```powershell
+$env:GODEBUG = "installgoroot=all"; go install std
 ```
 
 ## Hello, world!
@@ -398,21 +417,35 @@ $ plz test //src/...
 ## Third-party dependencies
 Duration: 7
 
-To add third party dependencies to Please, the easiest way is to use `///go//tools:please_go` to resolve them, and then
-add them to `third_party/go/BUILD`. Let's add `github.com/stretchr/testify`:
+To add third party dependencies to Please, resolve them with `go get`, and then add them to `third_party/go/BUILD`.
+Let's add `github.com/stretchr/testify`, and list the modules it brings with it:
 
 ```text
-$ plz run ///go//tools:please_go -- get github.com/stretchr/testify@v1.8.2
-go_repo(module="github.com/stretchr/objx", version="v0.5.0")
-go_repo(module="gopkg.in/yaml.v3", version="v3.0.1")
-go_repo(module="gopkg.in/check.v1", version="v0.0.0-20161208181325-20d25e280405")
-go_repo(module="github.com/stretchr/testify", version="v1.8.2")
-go_repo(module="github.com/davecgh/go-spew", version="v1.1.1")
-go_repo(module="github.com/pmezard/go-difflib", version="v1.0.0")
+$ go get github.com/stretchr/testify@v1.8.2
+$ go list -m all
+github.com/example/module
+github.com/davecgh/go-spew v1.1.1
+github.com/pmezard/go-difflib v1.0.0
+github.com/stretchr/objx v0.5.0
+github.com/stretchr/testify v1.8.2
+gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405
+gopkg.in/yaml.v3 v3.0.1
 ```
 
-We can then add them to `third_party/go/BUILD`:
+Each of those, other than our own module, becomes a `go_repo`. If you'd rather not write these by hand,
+[Puku](/codelabs/puku) can keep them in sync with `go.mod` for you.
+
+We can then add them to `third_party/go/BUILD`, beside the toolchain:
 ```python
+go_toolchain(
+    name = "toolchain",
+    version = "1.20",
+)
+
+go_stdlib(
+    name = "std",
+)
+
 # We give direct modules a name and install list so we can reference them nicely
 go_repo(
     name = "testify",

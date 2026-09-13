@@ -528,7 +528,7 @@ type Configuration struct {
 	Build   struct {
 		Arch                 cli.Arch     `help:"The target architecture to compile for. Defaults to the host architecture."`
 		Timeout              cli.Duration `help:"Default timeout for build actions. Default is ten minutes."`
-		Path                 []string     `help:"The PATH variable that will be passed to the build processes.\nDefaults to /usr/local/bin:/usr/bin:/bin but of course can be modified if you need to get binaries from other locations." example:"/usr/local/bin:/usr/bin:/bin"`
+		Path                 []string     `help:"The PATH variable that will be passed to the build processes.\nDefaults to /usr/local/bin:/usr/bin:/bin but of course can be modified if you need to get binaries from other locations. On Windows there is no default, and a tool named by a bare name that is not found here, such as wc or sed, runs as the applet of the busybox Please bundles." example:"/usr/local/bin:/usr/bin:/bin"`
 		Config               string       `help:"The build config to use when one is not chosen on the command line. Defaults to opt." example:"opt | dbg"`
 		FallbackConfig       string       `help:"The build config to use when one is chosen and a required target does not have one by the same name. Also defaults to opt." example:"opt | dbg"`
 		Lang                 string       `help:"Sets the language passed to build rules when building. This can be important for some tools (although hopefully not many) - we've mostly observed it with Sass."`
