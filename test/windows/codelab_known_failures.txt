@@ -12,14 +12,6 @@
 # Every entry rests either on a fact checked directly, or on what a native run printed, quoted in
 # its reason. Nothing is guessed at: a wrong guess fails the job exactly as a missing entry does.
 
-# An inline environment prefix, GODEBUG="installgoroot=all" go install std, is bash syntax.
-# PowerShell reads the assignment as the name of a command. The codelab gives no Windows form.
-puku::initialising-your-project-and-running-puku-with-please/b12.1
-
-# plz puku runs //third_party/binary:puku, a remote_file of puku-<version>-<os>_<arch>, and puku
-# publishes no windows_amd64 release. Every later step of the codelab depends on it.
-puku::adding-and-updating-modules/b3.1
-
 # Not a Windows failure. plz init plugin go generates third_party/go/BUILD with a go_toolchain and a
 # go_stdlib, and points STDLib at the stdlib. The codelab's "Add a go toolchain" block holds only a
 # go_toolchain: written as the file it replaces the go_stdlib, and appended it would define a second
