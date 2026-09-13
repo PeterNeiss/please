@@ -123,6 +123,7 @@ func TestClassify(t *testing.T) {
 		{"commands", "Run:\n```bash\nplz init\n```", KindCommand, ""},
 		{"inline env prefix", "Like so:\n```bash\nGODEBUG=\"installgoroot=all\" go install std\n```", KindCommand, ""},
 		{"transcript", "```\n$ plz build //:x\nBuild finished\n```", KindTranscript, ""},
+		{"powershell", "On Windows:\n```powershell\n$env:GODEBUG=\"installgoroot=all\"; go install std\n```", KindCommand, ""},
 		{"output in a bash fence", "The output should look like this:\n```bash\n.\n├── pleasew\n```", KindIllustration, ""},
 		// Each of these is a line in the codelabs that would otherwise be a file to create.
 		{"absolute path", "if Go is at `/opt/homebrew/bin/go`:\n```ini\n[Build]\n```", KindUnclassified, ""},

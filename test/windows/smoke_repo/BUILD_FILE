@@ -9,3 +9,14 @@ genrule(
     outs = ["sorted.txt"],
     cmd = "cat $SRCS | sort > $OUT",
 )
+
+# A build tool that is a shell script. Windows cannot start one by name, having no #! mechanism,
+# but the busybox running the build action reads the line itself - which is why `plz run` is the
+# only place Please has to do that for a script.
+genrule(
+    name = "words",
+    srcs = ["words.txt"],
+    outs = ["words.words"],
+    cmd = "$TOOLS_WC $SRC > $OUT",
+    tools = {"WC": ["//tools:wc"]},
+)

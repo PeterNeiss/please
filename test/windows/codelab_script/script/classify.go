@@ -97,6 +97,13 @@ func Classify(c Codelab, b Block, key string, side *Sidecar) (Kind, string, erro
 		return KindFile, m[1], nil
 	}
 
+	// A PowerShell block is commands by construction: it exists to be typed at a Windows prompt,
+	// and its lines - $env:GODEBUG="installgoroot=all"; go install std - start with nothing the
+	// verb list would recognise.
+	if b.Lang == "powershell" || b.Lang == "pwsh" {
+		return KindCommand, "", nil
+	}
+
 	if commandLangs[b.Lang] {
 		if hasPrompt(b.Body) {
 			return KindTranscript, "", nil
