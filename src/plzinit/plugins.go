@@ -49,7 +49,7 @@ var pinnedPlugins = map[string]pluginSource{
 	"go":     {Owner: "PeterNeiss", Revision: "0e182d7"},
 	"cc":     {Owner: "PeterNeiss", Revision: "90913bb"},
 	"shell":  {Owner: "PeterNeiss", Revision: "7ed07be"},
-	"python": {Owner: "PeterNeiss", Revision: "274c1e1"},
+	"python": {Owner: "PeterNeiss", Revision: "07c7f9a"},
 }
 
 var pluginInitFns = map[string]func() (map[string]string, error){
