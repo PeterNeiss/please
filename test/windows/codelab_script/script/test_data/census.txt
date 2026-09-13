@@ -115,7 +115,9 @@ puku::initialising-your-project-and-running-puku-with-please/b8 illustration  /u
 puku::initialising-your-project-and-running-puku-with-please/b9 command       which go
 puku::initialising-your-project-and-running-puku-with-please/b10 ignore        [Build]
 puku::initialising-your-project-and-running-puku-with-please/b11 ignore        [Build]
-puku::initialising-your-project-and-running-puku-with-please/b12 command       GODEBUG="installgoroot=all" go install std
+puku::initialising-your-project-and-running-puku-with-please/b12 file          .plzconfig
+puku::initialising-your-project-and-running-puku-with-please/b13 command       GODEBUG="installgoroot=all" go install std
+puku::initialising-your-project-and-running-puku-with-please/b14 command       $env:GODEBUG = "installgoroot=all"; go install std
 puku::adding-and-updating-modules/b1                     file          src/hello/hello.go
 puku::adding-and-updating-modules/b2                     command       go get github.com/google/uuid
 puku::adding-and-updating-modules/b3                     command       plz puku sync -w
@@ -123,9 +125,11 @@ puku::adding-and-updating-modules/b4                     file          src/hello
 puku::adding-and-updating-modules/b5                     command       plz puku fmt //src/hello
 puku::adding-and-updating-modules/b6                     command       plz run //src/hello
 puku::adding-and-updating-modules/b7                     command       GOTOOLCHAIN=local go get github.com/google/uuid@v1.6.0
-puku::adding-and-updating-modules/b8                     command       GOTOOLCHAIN=local go get -u github.com/google/uuid
-puku::adding-and-updating-modules/b9                     command       go get <module-name>
-puku::adding-and-updating-modules/b10                    command       go get <module-name>
+puku::adding-and-updating-modules/b8                     command       $env:GOTOOLCHAIN = "local"; go get github.com/google/uuid@v1...
+puku::adding-and-updating-modules/b9                     command       GOTOOLCHAIN=local go get -u github.com/google/uuid
+puku::adding-and-updating-modules/b10                    command       $env:GOTOOLCHAIN = "local"; go get -u github.com/google/uuid
+puku::adding-and-updating-modules/b11                    command       go get <module-name>
+puku::adding-and-updating-modules/b12                    command       go get <module-name>
 puku::stop-a-module-from-updating/b1                     command       go mod edit -exclude github.com/example/module@v2.0.0
 puku::stop-a-module-from-updating/b2                     command       go mod edit -dropexclude github.com/example/module@v2.0.0
 puku::stop-a-module-from-updating/b3                     command       go mod edit -replace github.com/example/module=github.com/ex...
