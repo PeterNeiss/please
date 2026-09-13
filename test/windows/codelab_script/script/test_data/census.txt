@@ -52,7 +52,7 @@ go_intro::testing-our-code/b3                            transcript    $ plz tes
 go_intro::testing-our-code/b4                            file          src/greetings/greetings_test.go
 go_intro::testing-our-code/b5                            file          src/greetings/BUILD
 go_intro::testing-our-code/b6                            transcript    $ plz test //src/...
-go_intro::third-party-dependencies/b1                    transcript    $ plz run ///go//tools:please_go -- get github.com/stretchr/...
+go_intro::third-party-dependencies/b1                    transcript    $ go get github.com/stretchr/testify@v1.8.2
 go_intro::third-party-dependencies/b2                    file          third_party/go/BUILD
 go_intro::third-party-dependencies/b3                    file          src/greetings/greetings_test.go
 go_intro::third-party-dependencies/b4                    file          src/greetings/BUILD
