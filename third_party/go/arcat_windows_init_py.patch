@@ -1,0 +1,62 @@
+Build Python package inits from /-separated names on Windows, as everything else in writer.go does.
+
+AddInitPyFiles walked member names with filepath.Dir and filepath.Base. Zip member names are
+always /-separated; on Windows those functions split on the backslash as well and hand back the
+host form, so a member a/b/c.py gave the directory a\b. Its __init__.py was looked up as
+a\b/__init__.py, never found, and written empty - beside the real a/b/__init__.py. zipimport
+normalises separators, so the empty one is what loads: every python_test built on Windows failed
+with "module 'xmlrunner' has no attribute 'XMLTestRunner'", because the test runner package came
+out with nothing in it. shouldInclude matched patterns with filepath.Match for the same names, and
+on Windows that function reads a backslash in a pattern as a separator rather than an escape.
+
+Applies after arcat_windows_rename.patch. See docs/design/windows/07-state-of-play.md.
+
+--- a/zip/writer.go
++++ b/zip/writer.go
+@@ -323,10 +323,10 @@
+ // shouldInclude returns true if the given filename should be included according to the include / exclude sets of this File.
+ func (f *File) shouldInclude(name string) bool {
+ 	for _, excl := range f.Exclude {
+-		if matched, _ := filepath.Match(excl, name); matched {
++		if matched, _ := path.Match(excl, name); matched {
+ 			log.Debug("Skipping %s (excluded by %s)", name, excl)
+ 			return false
+-		} else if matched, _ := filepath.Match(excl, filepath.Base(name)); matched {
++		} else if matched, _ := path.Match(excl, path.Base(name)); matched {
+ 			log.Debug("Skipping %s (excluded by %s)", name, excl)
+ 			return false
+ 		}
+@@ -335,7 +335,7 @@
+ 		return true
+ 	}
+ 	for _, incl := range f.Include {
+-		if matched, _ := filepath.Match(incl, name); matched || strings.HasPrefix(name, incl) {
++		if matched, _ := path.Match(incl, name); matched || strings.HasPrefix(name, incl) {
+ 			return true
+ 		}
+ 	}
+@@ -359,16 +359,20 @@
+ 		}
+ 	}
+ 	sort.Strings(s)
++	// Member names are always /-separated. The filepath functions split on the host separator and
++	// hand back its form, so on Windows every directory came out as a\b, its __init__.py was never
++	// found, and an empty a\b/__init__.py was written beside it - which zipimport, normalising
++	// separators, loaded in place of the real one.
+ 	for _, p := range s {
+-		n := filepath.Base(p)
+-		for d := filepath.Dir(p); d != "."; d = filepath.Dir(d) {
+-			if filepath.Base(d) == "__pycache__" {
++		n := path.Base(p)
++		for d := path.Dir(p); d != "."; d = path.Dir(d) {
++			if path.Base(d) == "__pycache__" {
+ 				break // Don't need to add an __init__.py here.
+ 			}
+ 			initPyPath := path.Join(d, "__init__.py")
+ 			// Don't write one at the root, it's not necessary.
+ 			if _, present := f.files[initPyPath]; present || initPyPath == "__init__.py" {
+-				if n == "__init__.py" && d == filepath.Dir(p) {
++				if n == "__init__.py" && d == path.Dir(p) {
+ 					continue
+ 				}
+ 				break

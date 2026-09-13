@@ -296,7 +296,8 @@ var opts struct {
 		Pleasew struct {
 		} `command:"pleasew" description:"Initialises the pleasew wrapper script"`
 		Plugin struct {
-			Version string `short:"v" long:"version" description:"Version of plugin to install. If not set, the latest is found."`
+			Version string `short:"v" long:"version" description:"Version of plugin to install. If not set, the pinned revision for a plugin this Please pins, otherwise the latest release."`
+			Owner   string `long:"owner" description:"GitHub owner to download the plugin from. If not set, the fork this Please pins the plugin to, otherwise please-build."`
 			Args    struct {
 				Plugins []string `positional-arg-name:"plugin" required:"true" description:"Plugins to install"`
 			} `positional-args:"true"`
@@ -781,7 +782,7 @@ var buildFunctions = map[string]func() int{
 		return 0
 	},
 	"init.plugin": func() int {
-		if err := plzinit.InitPlugins(opts.Init.Plugin.Args.Plugins, opts.Init.Plugin.Version); err != nil {
+		if err := plzinit.InitPlugins(opts.Init.Plugin.Args.Plugins, opts.Init.Plugin.Version, opts.Init.Plugin.Owner); err != nil {
 			log.Fatalf("%s", err)
 		}
 		return 0

@@ -1,6 +1,6 @@
 # State of Play
 
-Status: **Living document** · Last updated: 2026-09-12
+Status: **Living document** · Last updated: 2026-09-13
 
 Where the Windows port actually is, and what to pick up next. `06-milestones.md` is the
 per-milestone tracker with the reasoning; this is the short version for someone starting cold.
@@ -25,6 +25,19 @@ cross-builds them on Linux and runs them on `windows-latest`, alongside probes t
 with the release zip, clean and rebuild it five times, and build at a long path. That job is the
 only thing anywhere that is not taking Wine's word for it.
 
+**The codelabs are replayed there as well, and every one but k8s runs to its end.** Nothing had
+ever executed a codelab on any platform. The blocking `codelabs` job now passes 139 steps with a
+single known failure, k8s, which is outside the Windows work (`github_actions` has nothing to
+run). Getting there was mostly product fixes, found one step at a time as each unblocked the next:
+`plz init plugin` pinning the forks; Windows releases of please_go, please_pex and Puku; `plz run`
+of shebang scripts; a bare tool name like `wc` running as a busybox applet; arcat and please_pex
+writing empty `__init__.py` files over real ones; please_go's package info and the stdlib
+importconfig both mangling backslash paths; and an uncached pex that could neither lock its cache
+without pywin32 nor delete what it extracted. Where the text was the problem the codelab changed:
+Windows forms beside the Unix ones, `go get` for the `please_go get` go-rules removed, a
+`third_party/go/BUILD` that keeps its toolchain, and a label the plz query repo actually defines.
+See Loop D in `05-testing-strategy.md`.
+
 | # | Milestone | State |
 |---|---|---|
 | M0–M3, M6 | baseline, OS layer, paths, shell, Wine harness | done |
@@ -33,20 +46,23 @@ only thing anywhere that is not taking Wine's word for it.
 | M7 | sandboxing | decided against, documented |
 | M8 | plugins | go, cc, shell, python all done in local clones |
 | M9 | native Windows CI and GA | done — 18.0.0 |
+| M10 | The codelabs, replayed on Windows | done; all but k8s run on `windows-latest` |
 
-## The five repos
+## The repos
 
 | Repo | Branch | Head |
 |---|---|---|
-| `~/code/please` | `wine` | merged to `master` on the fork |
-| `~/code/go-rules` | `windows` | don't double the `.exe` |
+| `~/code/please` | `codelabs` | PR #4 on the fork, codelabs job green |
+| `~/code/go-rules` | `windows` | please_go 1.24.0-windows.4 |
 | `~/code/cc-rules` | `windows` | emit an import library |
 | `~/code/shell-rules` | `windows` | build an `sh_binary` as a `.cmd` |
-| `~/code/python-rules` | `windows` | build a `.pex` Windows can run |
+| `~/code/python-rules` | `windows` | please_pex 3.0.2-windows.5 |
+| `~/code/puku` | `windows` | a windows_amd64 release, `/`-joined subrepo names |
+| `~/code/please-codelabs` | `main` | pins the go-rules fork, for the plz query codelab |
 
 The plugin clones are branched at the tag `plugins/BUILD` used to pin, not at `master`. There is
-no push access to any of the *upstream* repos, so nothing is upstreamed, but all five are pushed
-to forks at `PeterNeiss/{please,go-rules,cc-rules,shell-rules,python-rules}`, and `plugins/BUILD`
+no push access to any of the *upstream* repos, so nothing is upstreamed, but all of them are pushed
+to forks at `PeterNeiss/*`, and `plugins/BUILD`
 now downloads the four plugins from there, pinned to commit SHAs. The local checkouts are no
 longer wired into anything: `.plzconfig.local` is inert and can be deleted.
 
@@ -163,3 +179,14 @@ Each of these has already cost time once.
 - **Python under Wine needs its output to be a pipe.** Wine's console emulation hands it handles
   it rejects at startup otherwise, and the error — `can't initialize sys standard streams` — reads
   like a problem with whatever you were testing. It is not.
+- **`plz init plugin <lang>` hands a Windows user plugins that cannot build there.** It writes
+  `owner = "please-build"`, and upstream `please_go`, `please_pex` and `please_cc` publish no
+  `windows_amd64` asset. This repo's `plugins/BUILD` uses the forks for exactly that reason, and
+  every codelab that installs a plugin inherits the problem. It is the single largest cause of
+  codelab failures and will be rediscovered by anyone who follows the docs.
+- **`plz init plugin` asks GitHub's API for the latest tag anonymously.** Shared CI addresses hit
+  the unauthenticated rate limit, and the failure reads as a plugin that cannot be found. A 403
+  from `api.github.com` in the codelabs job is that, not a regression.
+- **The Go codelabs predate `plz init plugin go` generating a toolchain and a stdlib.** Their
+  `third_party/go/BUILD` holds only a `go_toolchain`, so following them replaces the generated
+  `go_stdlib`, and every Go build then fails to find `//third_party/go:std`, on every platform.

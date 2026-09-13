@@ -34,7 +34,7 @@ Duration: 2
 For this codelab we will be using the Please codelabs repo:
 
 ```bash
-git clone https://github.com/thought-machine/please-codelabs
+git clone https://github.com/PeterNeiss/please-codelabs
 ```
 
 The output should look something like this:
@@ -277,7 +277,7 @@ go_test(
     srcs = ["greetings_test.go"],
     deps = [
         ":greetings",
-        "//third_party/go:assert",
+        "//third_party/go:testify",
     ],
     external = True,
 )

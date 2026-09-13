@@ -6,10 +6,10 @@
 # that reaches it and leave the cache serving something else. When the work lands upstream, the
 # owner goes back to please-build and these become ordinary version tags.
 PLUGINS = [
-    ("go", "go-rules", "abd06f1"),
+    ("go", "go-rules", "0e182d7"),
     ("cc", "cc-rules", "90913bb"),
     ("shell", "shell-rules", "7ed07be"),
-    ("python", "python-rules", "2edd835"),
+    ("python", "python-rules", "07c7f9a"),
 ]
 
 for name, plugin, revision in PLUGINS:
@@ -19,3 +19,11 @@ for name, plugin, revision in PLUGINS:
         plugin = plugin,
         revision = revision,
     )
+
+# This file as data, so //src/plzinit can check that `plz init plugin` pins the same revisions.
+filegroup(
+    name = "build_file",
+    srcs = ["BUILD"],
+    test_only = True,
+    visibility = ["//src/plzinit:all"],
+)

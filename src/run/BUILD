@@ -4,6 +4,9 @@ go_library(
         "env_other.go",
         "env_windows.go",
         "run_step.go",
+        "shebang.go",
+        "shebang_other.go",
+        "shebang_windows.go",
     ],
     pgo_file = "//:pgo",
     visibility = ["PUBLIC"],
@@ -20,7 +23,11 @@ go_library(
 
 go_test(
     name = "run_test",
-    srcs = ["run_test.go"],
+    srcs = [
+        "run_test.go",
+        "shebang_script_test.go",
+        "shebang_test.go",
+    ],
     data = [":run_test_data"],
     # So //test/windows can run this same binary, cross-built, under Wine.
     visibility = ["//test/windows:all"],

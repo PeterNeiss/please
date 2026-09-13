@@ -1,3 +1,22 @@
+Version 18.0.1
+--------------
+    * The codelabs are replayed on Windows in CI, and every one but k8s runs there
+      as written.
+    * A tool named by a bare name that is not on the build path, such as `wc`, runs
+      as the bundled busybox's applet on Windows, which has no directory of such
+      tools to put there.
+    * Python tests build on Windows. arcat and please_pex looked for a package's
+      `__init__.py` under a backslash name and wrote an empty one that shadowed it.
+    * `plz run` of a `#!/bin/sh` or `#!/bin/bash` script works on Windows, through
+      the bundled busybox.
+    * `plz init plugin` pins the plugins to commits that work on Windows, rather
+      than asking GitHub's API for a latest tag.
+    * `plz test //pkg/...` no longer panics on Windows, and build actions get
+      LOCALAPPDATA and APPDATA, which Go needs to find its cache there.
+    * The Go codelab uses `go get` in place of the removed `please_go get`, and
+      keeps its toolchain when adding third-party modules; the plz query codelab
+      depends on a target its repo defines. These failed on every platform.
+
 Version 18.0.0
 --------------
     * Native Windows support on amd64. `plz` runs, builds and tests on Windows,

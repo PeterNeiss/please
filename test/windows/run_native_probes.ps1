@@ -87,6 +87,41 @@ if ($code -ne 0) {
     }
 }
 
+# --- a shell script as a build tool ---------------------------------------------------------
+
+# Windows has no #! mechanism, but busybox, which runs the build action, reads the line itself. The
+# genrule codelab builds its word count with exactly this kind of tool - an extensionless
+# #!/bin/bash filegroup - so check the release runs one here, not only under Wine.
+Write-Host "::group::build //:words"
+$code = Invoke-Plz $work @('build', '//:words') 'shebang_tool.log'
+Write-Host '::endgroup::'
+if ($code -ne 0) {
+    $problems += "building //:words, which uses a #!/bin/bash tool, exited $code"
+} else {
+    $got = Get-Content (Join-Path $work 'plz-out\gen\words.words')
+    $want = Get-Content (Join-Path $work 'expected_words.txt')
+    if (Compare-Object $got $want) {
+        $problems += "//:words produced '$($got -join ',')' rather than '$($want -join ',')'"
+    }
+}
+
+# --- a busybox applet as a build tool -------------------------------------------------------
+
+# The genrule codelab's word_count defaults its tool to plain wc, found on the build path. Windows has
+# nothing there that provides it, so Please falls back to the bundled busybox's applet.
+Write-Host "::group::build //:applet_words"
+$code = Invoke-Plz $work @('build', '//:applet_words') 'applet_tool.log'
+Write-Host '::endgroup::'
+if ($code -ne 0) {
+    $problems += "building //:applet_words, which names plain wc as its tool, exited $code"
+} else {
+    $got = Get-Content (Join-Path $work 'plz-out\gen\applet_words.txt')
+    $want = Get-Content (Join-Path $work 'expected_applet_words.txt')
+    if (Compare-Object $got $want) {
+        $problems += "//:applet_words produced '$($got -join ',')' rather than '$($want -join ',')'"
+    }
+}
+
 # --- files held open on teardown ------------------------------------------------------------
 
 # Windows refuses to delete or rename a file another process has open, and Wine is more
