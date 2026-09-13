@@ -116,13 +116,18 @@ Go toolchain with Please.
 ### Recommended: managed toolchain
 
 The simplest way is to let Please manage your toolchain for you. The `go_toolchain()` rule will download the Go 
-toolchain, compiling the standard library if necessary. Simply add the following rule to your project:
+toolchain, and `go_stdlib()` compiles its standard library, which Go no longer ships from 1.20. Simply add the following
+rules to your project:
 
 ### `third_party/go/BUILD`
 ```python
 go_toolchain(
     name = "toolchain",
     version = "1.20",
+)
+
+go_stdlib(
+    name = "std",
 )
 ```
 
@@ -133,6 +138,7 @@ And then configure the Go plugin to use it like so:
 Target = //plugins:go
 ImportPath = github.com/example/module
 GoTool = //third_party/go:toolchain|go
+STDLib = //third_party/go:std
 ```
 
 ### Using Go from the system PATH
@@ -142,7 +148,7 @@ By default, Please will look for Go in the following locations:
 /usr/local/bin:/usr/bin:/bin
 ```
 
-If you have Please installed elsewhere, you must configure the path like so:
+If you have Go installed elsewhere, you must configure the path like so:
 
 ### `.plzconfig`
 ```text
@@ -155,6 +161,19 @@ the path with Please, you must install it. This can be done like so:
 
 ```bash
 GODEBUG="installgoroot=all" go install std
+```
+
+On Windows the default path is empty, so Please finds no Go until you say where to look. The simplest way is to pass
+your own `PATH` through, and to set the variable the PowerShell way:
+
+### `.plzconfig`
+```text
+[Build]
+PassEnv = PATH
+```
+
+```powershell
+$env:GODEBUG = "installgoroot=all"; go install std
 ```
 
 ## Hello, world!

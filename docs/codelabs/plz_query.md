@@ -34,7 +34,7 @@ Duration: 2
 For this codelab we will be using the Please codelabs repo:
 
 ```bash
-git clone https://github.com/thought-machine/please-codelabs
+git clone https://github.com/PeterNeiss/please-codelabs
 ```
 
 The output should look something like this:

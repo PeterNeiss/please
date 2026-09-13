@@ -33,6 +33,8 @@ go_intro::setting-up-your-toolchain/b2                   file          .plzconfi
 go_intro::setting-up-your-toolchain/b3                   illustration  /usr/local/bin:/usr/bin:/bin
 go_intro::setting-up-your-toolchain/b4                   ignore        [Build]
 go_intro::setting-up-your-toolchain/b5                   command       GODEBUG="installgoroot=all" go install std
+go_intro::setting-up-your-toolchain/b6                   ignore        [Build]
+go_intro::setting-up-your-toolchain/b7                   command       $env:GODEBUG = "installgoroot=all"; go install std
 go_intro::hello-world/b1                                 file          src/main.go
 go_intro::hello-world/b2                                 file          src/BUILD
 go_intro::hello-world/b3                                 command       plz run //src:main
@@ -85,7 +87,7 @@ k8s::please-deploy/b1                                    command       plz run s
 k8s::please-deploy/b2                                    file          .plzconfig
 k8s::please-deploy/b3                                    command       plz deploy //hello_service/...
 k8s::docker-build-and-build-systems/b1                   illustration  docker_image(
-plz_query::setting-up/b1                                 command       git clone https://github.com/thought-machine/please-codelabs
+plz_query::setting-up/b1                                 command       git clone https://github.com/PeterNeiss/please-codelabs
 plz_query::setting-up/b2                                 illustration  Cloning into 'please-codelabs'...
 plz_query::setting-up/b3                                 command       cd please-codelabs/getting_started_go
 plz_query::finding-dependencies-of-a-target/b1           transcript    $ plz query deps //src/greetings:greetings_test
@@ -138,8 +140,9 @@ puku::using-new-modules/b3                               illustration  go_librar
 puku::using-new-modules/b4                               command       plz puku watch //src/...
 python_intro::initialising-your-project/b1               command       mkdir getting_started_python && cd getting_started_python
 python_intro::initialising-your-project/b2               ignore        [build]
-python_intro::initialising-your-project/b3               transcript    $ tree -a
-python_intro::initialising-your-project/b4               illustration  [parse]
+python_intro::initialising-your-project/b3               file          .plzconfig
+python_intro::initialising-your-project/b4               transcript    $ tree -a
+python_intro::initialising-your-project/b5               illustration  [parse]
 python_intro::hello-world/b1                             file          src/main.py
 python_intro::hello-world/b2                             file          src/BUILD
 python_intro::hello-world/b3                             transcript    $ plz run //src:main
