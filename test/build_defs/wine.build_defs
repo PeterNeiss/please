@@ -313,3 +313,29 @@ def wine_plz_test(
         sandbox = False,
         test_cmd = test_cmd,
     )
+
+def wine_script_test(name:str, data:dict, cmds:list, labels:list=[], timeout:int=600):
+    """Runs a shell script that drives Windows binaries under Wine itself.
+
+    For checks that fit none of the macros above: several steps, their own inputs made on the
+    spot, and assertions on what the binaries wrote rather than on what they printed.
+
+    Args:
+      name (str): Name of the rule.
+      data (dict): Named runtime data, available to the script as $DATA_<NAME> as in gentest.
+      cmds (list): Shell commands, run in order in $TMP_DIR with the Wine prefix set up. Any
+                   one failing fails the test.
+      labels (list): Extra labels for the rule.
+      timeout (int): Test timeout in seconds.
+    """
+    return gentest(
+        name = name,
+        timeout = timeout,
+        data = data,
+        env = WINE_ENV,
+        labels = labels + ["wine", "windows"],
+        local = True,
+        no_test_output = True,
+        sandbox = False,
+        test_cmd = " && ".join([_wine_setup_cmd()] + cmds),
+    )

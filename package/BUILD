@@ -22,6 +22,7 @@ if is_platform(os = "windows"):
         outs = ["arcat.exe"],
         binary = True,
         cmd = "cp $SRC $OUT",
+        visibility = ["//test/windows:all"],
     )
 
 filegroup(

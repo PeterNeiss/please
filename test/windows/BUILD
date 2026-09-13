@@ -161,6 +161,15 @@ wine_plz_test(
     repo = "smoke_repo",
 )
 
+# A bare tool name that nothing on the build path provides, which Windows' empty default path never
+# does. The bundled busybox has it as an applet, and Please runs that.
+wine_plz_test(
+    name = "applet_tool_test",
+    cmd = "build //:applet_words",
+    expected_output = {"plz-out/gen/applet_words.txt": "expected_applet_words.txt"},
+    repo = "smoke_repo",
+)
+
 # A .pex is a zip with an executable stub in front of it, so on Windows it needs a Windows stub;
 # the one please_pex prepends everywhere else is an ELF binary and will not run at all. This
 # checks the whole chain - the preamble runs, finds an interpreter, and Python imports the test
@@ -228,6 +237,28 @@ wine_binary_test(
     # are read-only, and a read-only file on Windows cannot be replaced at all - so the
     # second run is where a stale payload would go unnoticed.
     runs = 2,
+)
+
+# arcat assembles every python_binary and python_test, adding an __init__.py wherever a package
+# lacks one. Built on Windows, it used to look for them under backslash-separated names, miss the
+# real ones and write empty ones beside them - which zipimport, normalising separators, loaded in
+# their place. The Wine pex tests could not see it: their pexes are assembled on Linux.
+wine_script_test(
+    name = "arcat_init_py_test",
+    cmds = [
+        'cp "$DATA_ARCAT" arcat.exe',
+        "mkdir -p in/pkg/sub",
+        "echo 'VALUE = 42' > in/pkg/sub/__init__.py",
+        "echo 'import pkg.sub' > in/pkg/sub/mod.py",
+        "cd in",
+        "wine ../arcat.exe z -d -o ../out.zip -i pkg --include_other --add_init_py",
+        "cd ..",
+        # No member may carry a backslash, and the package's own __init__.py keeps its content.
+        'if unzip -Z1 out.zip | grep -F "\\\\"; then echo "backslash in a member name"; exit 1; fi',
+        'unzip -Z1 out.zip | grep -qx "pkg/__init__.py"',
+        '[ "$(unzip -p out.zip pkg/sub/__init__.py)" = "VALUE = 42" ]',
+    ],
+    data = {"ARCAT": ["///windows_amd64//package:arcat"]},
 )
 
 # Everything the release zip should contain, and nothing else. None of these names needs
