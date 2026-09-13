@@ -46,7 +46,7 @@ type pluginSource struct {
 // are copies of upstream's and their newest tags do not contain the Windows work; and a pin needs
 // no call to GitHub's API, which refuses anonymous callers from shared CI addresses.
 var pinnedPlugins = map[string]pluginSource{
-	"go":     {Owner: "PeterNeiss", Revision: "52d9e0f"},
+	"go":     {Owner: "PeterNeiss", Revision: "9c26bfd"},
 	"cc":     {Owner: "PeterNeiss", Revision: "90913bb"},
 	"shell":  {Owner: "PeterNeiss", Revision: "7ed07be"},
 	"python": {Owner: "PeterNeiss", Revision: "eecfd15"},

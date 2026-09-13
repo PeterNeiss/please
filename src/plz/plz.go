@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -784,8 +785,7 @@ func (r *runner) queueOriginalTask(ctx context.Context, target core.BuildLabel, 
 		prefix = subrepo.Dir(prefix)
 	}
 	for filename := range FindAllBuildFiles(r.state.Config, dir, "") {
-		dirname, _ := filepath.Split(filename)
-		l := core.NewBuildLabel(strings.TrimLeft(strings.TrimPrefix(strings.TrimRight(dirname, "/"), prefix), "/"), "all")
+		l := core.NewBuildLabel(packageNameOf(filename, prefix), "all")
 		l.Subrepo = target.Subrepo
 		r.queueTask(ctx, l, needTest, needBuild)
 	}
@@ -816,6 +816,16 @@ func (r *runner) queueTask(ctx context.Context, target core.BuildLabel, needTest
 		}
 		return r.RecursiveParse(ctx, target, core.OriginalTarget)
 	})
+}
+
+// packageNameOf returns the package a BUILD file found on disk belongs to, relative to prefix.
+//
+// The walk returns paths in the platform's own form, and a package name is slash-separated
+// everywhere. On Windows the directory came back as "src\", which only "/" was trimmed from, so
+// `plz test //src/...` panicked with "Invalid package name: src\".
+func packageNameOf(filename, prefix string) string {
+	dirname, _ := path.Split(filepath.ToSlash(filename))
+	return strings.TrimLeft(strings.TrimPrefix(strings.TrimRight(dirname, "/"), filepath.ToSlash(prefix)), "/")
 }
 
 // FindAllBuildFiles finds all BUILD files under a particular path.

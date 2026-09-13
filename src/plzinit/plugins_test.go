@@ -27,6 +27,7 @@ func serveTags(t *testing.T, handler http.HandlerFunc) {
 
 // noNetwork fails the test if anything tries to list tags.
 func noNetwork(t *testing.T) {
+	t.Helper()
 	serveTags(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected tag lookup: %s", r.URL)
 		w.WriteHeader(http.StatusInternalServerError)

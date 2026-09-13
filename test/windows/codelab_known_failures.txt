@@ -18,3 +18,10 @@
 # target named toolchain. The second native run stopped here with //third_party/go:std missing. The
 # k8s codelab is outside the Windows fixes and is unedited, so this still fails on every platform.
 k8s::using-our-base-image/b3.1
+
+# The codelab's word_count build definition defaults its tool to plain `wc`, found on the build path.
+# On Windows the default [build] path is empty and nothing there provides wc: the bundled busybox
+# has it as an applet, but not as a program a tool label can name. The native run reported "wc not
+# found in path ... No [build] path is configured". A later section of the codelab replaces the
+# default with //tools:wc, but this build comes first, and the rest of the codelab is blocked.
+genrule::managing-tools/b6.1
