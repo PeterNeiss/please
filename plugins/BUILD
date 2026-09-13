@@ -6,7 +6,7 @@
 # that reaches it and leave the cache serving something else. When the work lands upstream, the
 # owner goes back to please-build and these become ordinary version tags.
 PLUGINS = [
-    ("go", "go-rules", "52d9e0f"),
+    ("go", "go-rules", "9c26bfd"),
     ("cc", "cc-rules", "90913bb"),
     ("shell", "shell-rules", "7ed07be"),
     ("python", "python-rules", "eecfd15"),
