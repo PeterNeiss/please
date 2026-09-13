@@ -435,8 +435,17 @@ gopkg.in/yaml.v3 v3.0.1
 Each of those, other than our own module, becomes a `go_repo`. If you'd rather not write these by hand,
 [Puku](/codelabs/puku) can keep them in sync with `go.mod` for you.
 
-We can then add them to `third_party/go/BUILD`:
+We can then add them to `third_party/go/BUILD`, beside the toolchain:
 ```python
+go_toolchain(
+    name = "toolchain",
+    version = "1.20",
+)
+
+go_stdlib(
+    name = "std",
+)
+
 # We give direct modules a name and install list so we can reference them nicely
 go_repo(
     name = "testify",
