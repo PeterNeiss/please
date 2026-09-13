@@ -9,7 +9,7 @@ PLUGINS = [
     ("go", "go-rules", "0e182d7"),
     ("cc", "cc-rules", "90913bb"),
     ("shell", "shell-rules", "7ed07be"),
-    ("python", "python-rules", "274c1e1"),
+    ("python", "python-rules", "07c7f9a"),
 ]
 
 for name, plugin, revision in PLUGINS:
