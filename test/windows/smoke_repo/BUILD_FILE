@@ -20,3 +20,13 @@ genrule(
     cmd = "$TOOLS_WC $SRC > $OUT",
     tools = {"WC": ["//tools:wc"]},
 )
+
+# A bare tool name, the way the genrule codelab's word_count names plain wc. Windows has no
+# directory of such tools for the build path to hold, so Please runs the bundled busybox's applet.
+genrule(
+    name = "applet_words",
+    srcs = ["words.txt"],
+    outs = ["applet_words.txt"],
+    cmd = "$TOOLS_WC -w < $SRC > $OUT",
+    tools = {"WC": ["wc"]},
+)

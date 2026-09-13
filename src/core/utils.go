@@ -571,7 +571,20 @@ func CollapseHash(key []byte) []byte {
 // LookPath does roughly the same as exec.LookPath, i.e. looks for the named file on the path.
 // The main difference is that it looks based on our config which isn't necessarily the same
 // as the external environment variable.
+//
+// On Windows, a bare name found nowhere on the path may still be one of the bundled busybox's
+// applets; see appletFallback.
 func LookPath(filename string, paths []string) (string, error) {
+	path, err := lookPath(filename, paths)
+	if err != nil && appletsSupported && RepoRoot != "" {
+		if applet, ok := appletFallback(filename, paths, filepath.Join(RepoRoot, OutDir)); ok {
+			return applet, nil
+		}
+	}
+	return path, err
+}
+
+func lookPath(filename string, paths []string) (string, error) {
 	names := fs.ExecutableNames(filename)
 	dirs := 0
 	for _, p := range paths {
