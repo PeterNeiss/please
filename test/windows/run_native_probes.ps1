@@ -105,6 +105,23 @@ if ($code -ne 0) {
     }
 }
 
+# --- a busybox applet as a build tool -------------------------------------------------------
+
+# The genrule codelab's word_count defaults its tool to plain wc, found on the build path. Windows has
+# nothing there that provides it, so Please falls back to the bundled busybox's applet.
+Write-Host "::group::build //:applet_words"
+$code = Invoke-Plz $work @('build', '//:applet_words') 'applet_tool.log'
+Write-Host '::endgroup::'
+if ($code -ne 0) {
+    $problems += "building //:applet_words, which names plain wc as its tool, exited $code"
+} else {
+    $got = Get-Content (Join-Path $work 'plz-out\gen\applet_words.txt')
+    $want = Get-Content (Join-Path $work 'expected_applet_words.txt')
+    if (Compare-Object $got $want) {
+        $problems += "//:applet_words produced '$($got -join ',')' rather than '$($want -join ',')'"
+    }
+}
+
 # --- files held open on teardown ------------------------------------------------------------
 
 # Windows refuses to delete or rename a file another process has open, and Wine is more
