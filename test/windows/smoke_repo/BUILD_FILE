@@ -23,6 +23,15 @@ genrule(
 
 # A bare tool name, the way the genrule codelab's word_count names plain wc. Windows has no
 # directory of such tools for the build path to hold, so Please runs the bundled busybox's applet.
+# The subject of the --shell tests: a test whose command reads its data and the test directory
+# out of the environment, which `plz test --shell` has to set up the way a real run would.
+gentest(
+    name = "data_test",
+    data = ["words.txt"],
+    no_test_output = True,
+    test_cmd = 'grep -q . "$DATA" && [ -d "$TEST_DIR" ] && echo "data_test ran in $TEST_DIR"',
+)
+
 genrule(
     name = "applet_words",
     srcs = ["words.txt"],
