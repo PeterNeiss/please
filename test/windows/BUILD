@@ -1,0 +1,375 @@
+subinclude("//test/build_defs:wine", "//test/build_defs:windows_bundle")
+
+# The unit tests worth running on Windows are the ones the port actually changed: process
+# management and locking, the filesystem layer, and config and path handling. Each entry is
+# (name, cross-built test target, runtime data, whether it needs a shell).
+#
+# This list has one definition because it is consumed twice: wine_go_test runs each binary
+# under Wine here, and windows_test_bundle packages the same binaries and the same data for a
+# real Windows machine to run natively. See docs/design/windows/05-testing-strategy.md for what
+# each of those is worth.
+WINDOWS_GO_TESTS = [
+    (
+        "fs_test",
+        "///windows_amd64//src/fs:fs_test",
+        ["///windows_amd64//src/fs:test_data"],
+        False,
+    ),
+    (
+        "core_test",
+        "///windows_amd64//src/core:core_test",
+        ["///windows_amd64//src/core:test_data"],
+        False,
+    ),
+    # Runs real build actions, so it exercises the process layer and the bundled shell as well
+    # as whatever it is nominally about.
+    (
+        "build_test",
+        "///windows_amd64//src/build:build_test",
+        ["///windows_amd64//src/build:test_data"],
+        True,
+    ),
+    # Coverage parsing and the command-line layer: neither runs a build action, but both handle
+    # paths that came from somewhere else.
+    (
+        "test_test",
+        "///windows_amd64//src/test:test_test",
+        ["///windows_amd64//src/test:test_data"],
+        False,
+    ),
+    ("cli_test", "///windows_amd64//src/cli:cli_test", [], False),
+    # Generating the internal package, which is where a platform without a published arcat is
+    # handled. The parsing itself is covered by asp_test below.
+    ("parse_test", "///windows_amd64//src/parse:internal_package_test", [], False),
+    (
+        "asp_test",
+        "///windows_amd64//src/parse/asp:asp_test",
+        ["///windows_amd64//src/parse/asp:asp_test_data"],
+        False,
+    ),
+    (
+        "query_test",
+        "///windows_amd64//src/query:query_test",
+        ["///windows_amd64//src/query:query_test_data"],
+        False,
+    ),
+    (
+        "format_test",
+        "///windows_amd64//src/format:format_test",
+        ["///windows_amd64//src/format:format_test_data"],
+        False,
+    ),
+    (
+        "export_test",
+        "///windows_amd64//src/export:export_test",
+        ["///windows_amd64//src/export:export_test_data"],
+        False,
+    ),
+    ("output_test", "///windows_amd64//src/output:output_test", [], False),
+    (
+        "hashes_test",
+        "///windows_amd64//src/hashes:hash_rewriter_test",
+        ["///windows_amd64//src/hashes:hash_rewriter_test_data"],
+        False,
+    ),
+    (
+        "gc_test",
+        "///windows_amd64//src/gc:gc_test",
+        ["///windows_amd64//src/gc:gc_test_data"],
+        False,
+    ),
+    ("tool_test", "///windows_amd64//src/tool:tool_test", [], False),
+    ("plz_test", "///windows_amd64//src/plz:plz_test", [], False),
+    ("clean_test", "///windows_amd64//src/clean:clean_test", [], False),
+    (
+        "cache_test",
+        "///windows_amd64//src/cache:cache_test",
+        ["///windows_amd64//src/cache:cache_test_data"],
+        True,
+    ),
+    ("exec_test", "///windows_amd64//src/exec:exec_test", [], True),
+    ("process_test", "///windows_amd64//src/process:process_test", [], True),
+    (
+        "update_test",
+        "///windows_amd64//src/update:update_test",
+        [
+            "///windows_amd64//src/update:test_data",
+            "///windows_amd64//src/update:test_please",
+            "///windows_amd64//src/update:test_tarball",
+            "///windows_amd64//src:please",
+        ],
+        False,
+    ),
+    (
+        "remote_test",
+        "///windows_amd64//src/remote:remote_test",
+        ["///windows_amd64//src/remote:remote_test_data"],
+        False,
+    ),
+    (
+        "run_test",
+        "///windows_amd64//src/run:run_test",
+        ["///windows_amd64//src/run:run_test_data"],
+        False,
+    ),
+    # plz watch compares the paths it recorded against the ones fsnotify reports, which use
+    # different separators on Windows. A mismatch is silent - every event looks like it belongs
+    # to a file we aren't watching - so this only means anything when run on one.
+    ("watch_test", "///windows_amd64//src/watch:watch_test", [], False),
+]
+
+[
+    wine_go_test(
+        name = name,
+        data = data,
+        needs_shell = shell,
+        test = target,
+    )
+    for name, target, data, shell in WINDOWS_GO_TESTS
+]
+
+# The same binaries and the same data, packaged for a windows-latest runner to run natively.
+# This is what turns "passes under Wine" into evidence from Windows.
+windows_test_bundle(
+    name = "native_test_bundle",
+    tests = WINDOWS_GO_TESTS,
+)
+
+# The shell smoke test: a real build action with a pipe and a redirect, run by the busybox
+# that ships in the Windows release, found the way a user's install would find it.
+wine_plz_test(
+    name = "shell_test",
+    cmd = "build //:pipeline",
+    expected_output = {"plz-out/gen/sorted.txt": "expected_sorted.txt"},
+    repo = "smoke_repo",
+)
+
+# A dropped forceposix build tag breaks every build label and is invisible in Please's own
+# source, so assert label parsing works at all.
+wine_plz_test(
+    name = "label_test",
+    cmd = "query alltargets //...",
+    repo = "smoke_repo",
+)
+
+# A shell script as a build tool: the genrule codelab's word count, written the Unix way. Windows has
+# no #! mechanism; this is the evidence that busybox, running the build action, reads the line itself.
+wine_plz_test(
+    name = "shebang_tool_test",
+    cmd = "build //:words",
+    expected_output = {"plz-out/gen/words.words": "expected_words.txt"},
+    repo = "smoke_repo",
+)
+
+# A bare tool name that nothing on the build path provides, which Windows' empty default path never
+# does. The bundled busybox has it as an applet, and Please runs that.
+wine_plz_test(
+    name = "applet_tool_test",
+    cmd = "build //:applet_words",
+    expected_output = {"plz-out/gen/applet_words.txt": "expected_applet_words.txt"},
+    repo = "smoke_repo",
+)
+
+# --shell prepares a target's directory and then opens the configured shell in it, which on Windows
+# is the bundled busybox. Both tests lay the release out as wine_plz_test does, but drive please.exe
+# themselves: the interactive one feeds the shell on stdin, and both look in plz-out/tmp rather than
+# plz-out/gen, which --shell never writes to.
+SHELL_TEST_DATA = {
+    "PLEASE": ["///windows_amd64//src:please"],
+    "BUSYBOX": ["///windows_amd64//third_party/binary:busybox"],
+    "REPO": ["smoke_repo"],
+}
+
+SHELL_TEST_SETUP = [
+    "mkdir -p plzdir",
+    'cp "$DATA_PLEASE" plzdir/please.exe',
+    'cp "$DATA_BUSYBOX" plzdir/busybox.exe',
+    'cp -r "$DATA_REPO" repo',
+    "cd repo",
+]
+
+# --shell=run runs the command in that shell and nothing else.
+wine_script_test(
+    name = "shell_run_test",
+    cmds = SHELL_TEST_SETUP + [
+        "wine ../plzdir/please.exe build --shell=run //:pipeline",
+        "diff -u expected_sorted.txt plz-out/tmp/pipeline._build/sorted.txt",
+        "wine ../plzdir/please.exe test --shell=run //:data_test > ../test_output",
+        "cat ../test_output",
+        "grep -qx 'data_test ran in [A-Z]:/.*/plz-out/tmp/data_test._test/run_1' ../test_output",
+        # The directory is printed for pasting into that shell, so it must not have backslashes.
+        "grep -q '^  //:data_test: [A-Z]:/.*/run_1$' ../test_output",
+    ],
+    data = SHELL_TEST_DATA,
+)
+
+# Plain --shell is interactive. Its stdin here is a script rather than a console, which is as close
+# as a test gets: it covers where the shell starts and what it has in its environment.
+wine_script_test(
+    name = "interactive_shell_test",
+    cmds = SHELL_TEST_SETUP + [
+        "printf '%s\\n' 'eval \"$CMD\" && echo EVAL_OK' pwd | wine ../plzdir/please.exe build --shell //:pipeline > ../build_output",
+        "cat ../build_output",
+        "grep -qx EVAL_OK ../build_output",
+        "grep -qx '[A-Z]:/.*/plz-out/tmp/pipeline._build' ../build_output",
+        "diff -u expected_sorted.txt plz-out/tmp/pipeline._build/sorted.txt",
+        "printf '%s\\n' 'eval \"$CMD\"' 'echo \"DATA=$DATA\"' | wine ../plzdir/please.exe test --shell //:data_test > ../test_output",
+        "cat ../test_output",
+        "grep -qx 'data_test ran in [A-Z]:/.*/plz-out/tmp/data_test._test/run_1' ../test_output",
+        "grep -qx DATA=words.txt ../test_output",
+    ],
+    data = SHELL_TEST_DATA,
+)
+
+# A .pex is a zip with an executable stub in front of it, so on Windows it needs a Windows stub;
+# the one please_pex prepends everywhere else is an ELF binary and will not run at all. This
+# checks the whole chain - the preamble runs, finds an interpreter, and Python imports the test
+# out of the zip - which is the only way any of it is exercised before a Windows machine exists.
+wine_pex_test(
+    name = "pex_test",
+    data = ["//test/windows/python:data"],
+    pex = "///windows_amd64//test/windows/python:pex_test",
+)
+
+# The preamble runs the interpreter as a child rather than replacing itself with it, because
+# Windows has nothing to replace itself with. That makes passing the exit code back its job.
+wine_pex_test(
+    name = "pex_exit_code_test",
+    args = "7",
+    exit_code = 7,
+    pex = "///windows_amd64//test/windows/python:exit_code",
+    test_output = False,
+)
+
+# Windows resolves a DLL's symbols through an import library rather than through the DLL, so
+# linking against a cc_shared_object needs one to exist. This builds the pair, links one against
+# the other, and runs it - which also covers the DLL being found at run time, where Windows has
+# no rpath and looks beside the binary instead.
+# cc_test was recorded as blocked on Windows because UnitTest++ supposedly needs Win32
+# sources the plugin does not include. It does include them. What actually blocked it was
+# that the plugin's own targets - the UnitTest++ test main is a cc_library here - compiled
+# with the host toolchain whatever the using repo configured, so the Win32 sources were
+# handed to a compiler with no windows.h.
+#
+# The runtime DLLs travel beside it; see //test/windows/cc:mingw_runtime for why they
+# cannot simply be linked in.
+wine_binary_test(
+    name = "cc_test_test",
+    binary = "///windows_amd64//test/windows/cc:greeting_test",
+    data = [
+        "///windows_amd64//test/windows/cc:greeting",
+        "///windows_amd64//test/windows/cc:mingw_runtime",
+    ],
+    # Exit code rather than output: UnitTest++ writes its results as XML to test.results
+    # and prints nothing when everything passes. It returns the number of failures, so zero
+    # is the assertion - and a binary that could not start at all exits 53, not 0.
+)
+
+wine_binary_test(
+    name = "dll_test",
+    binary = "///windows_amd64//test/windows/cc:hello",
+    data = ["///windows_amd64//test/windows/cc:greeting"],
+    expected_output = "hello from a dll",
+)
+
+# Windows has no shebang mechanism, so an sh_binary comes out as a .cmd there: a batch preamble
+# that unpacks the zip appended to it and hands the script to the bundled busybox. This runs one
+# the way a user would, and covers all three things the preamble has to get right - the payload
+# is unpacked, arguments reach the script, and its exit status comes back out.
+wine_binary_test(
+    name = "sh_binary_test",
+    args = "world 3",
+    batch = True,
+    binary = "///windows_amd64//test/windows/shell:greet",
+    exit_code = 3,
+    expected_output = "hello from world",
+    needs_shell = True,
+    # Twice, in the one directory. The payload it unpacks is a set of build outputs, which
+    # are read-only, and a read-only file on Windows cannot be replaced at all - so the
+    # second run is where a stale payload would go unnoticed.
+    runs = 2,
+)
+
+# arcat assembles every python_binary and python_test, adding an __init__.py wherever a package
+# lacks one. Built on Windows, it used to look for them under backslash-separated names, miss the
+# real ones and write empty ones beside them - which zipimport, normalising separators, loaded in
+# their place. The Wine pex tests could not see it: their pexes are assembled on Linux.
+wine_script_test(
+    name = "arcat_init_py_test",
+    cmds = [
+        'cp "$DATA_ARCAT" arcat.exe',
+        "mkdir -p in/pkg/sub",
+        "echo 'VALUE = 42' > in/pkg/sub/__init__.py",
+        "echo 'import pkg.sub' > in/pkg/sub/mod.py",
+        "cd in",
+        "wine ../arcat.exe z -d -o ../out.zip -i pkg --include_other --add_init_py",
+        "cd ..",
+        # No member may carry a backslash, and the package's own __init__.py keeps its content.
+        'if unzip -Z1 out.zip | grep -F "\\\\"; then echo "backslash in a member name"; exit 1; fi',
+        'unzip -Z1 out.zip | grep -qx "pkg/__init__.py"',
+        '[ "$(unzip -p out.zip pkg/sub/__init__.py)" = "VALUE = 42" ]',
+    ],
+    data = {"ARCAT": ["///windows_amd64//package:arcat"]},
+)
+
+# Everything the release zip should contain, and nothing else. None of these names needs
+# quoting in a shell word, which is what lets them go straight into the printf below.
+RELEASE_MEMBERS = [
+    "please",
+    "please/Install.md",
+    "please/arcat.exe",
+    "please/build_langserver.exe",
+    "please/busybox.exe",
+    "please/please.exe",
+    "please/plz.cmd",
+]
+
+# The shape of the artifact, checked on Linux without Wine. It catches the things that would
+# otherwise only show up on a real Windows machine: a tool that lost its .exe and so cannot be
+# run at all, or a file quietly dropped from the release.
+#
+# Labelled wine like the rest of this package, not because anything here runs under Wine but
+# because building it means cross-compiling for Windows, which is what that label gates.
+gentest(
+    name = "release_shape_test",
+    data = {"ZIP": ["///windows_amd64//package:please_zip"]},
+    labels = [
+        "wine",
+        "windows",
+    ],
+    no_test_output = True,
+    test_cmd = " && ".join([
+        # $DATA_ZIP is relative to the test directory, and unzip is about to leave it.
+        'zip="$PWD/$DATA_ZIP"',
+        'unzip -Z1 "$zip" | sed "s|/$||" | sort > "$TMP_DIR/got"',
+        # Both sides sorted by the same sort, so the list above can stay in a readable order
+        # rather than whatever collation this machine happens to use.
+        'printf "%s\\n" ' + " ".join(RELEASE_MEMBERS) + ' | sort > "$TMP_DIR/want"',
+        'diff -u "$TMP_DIR/want" "$TMP_DIR/got"',
+    ]),
+)
+
+# The decisions about what the codelabs mean, and what is known to fail when they run on Windows.
+# Read by //test/windows/codelab_script's tests on Linux, and by run_codelabs.ps1 on Windows.
+filegroup(
+    name = "codelab_metadata",
+    srcs = [
+        "codelab_known_failures.txt",
+        "codelab_steps.conf",
+    ],
+    visibility = ["//test/windows/..."],
+)
+
+# The plan run_codelabs.ps1 replays. Built on Linux and handed to the Windows job as an artifact,
+# so the Windows machine consumes something these tests have already checked. Deliberately not
+# labelled wine: building it cross-compiles nothing.
+genrule(
+    name = "codelab_plan",
+    srcs = {
+        "CODELABS": ["//docs/codelabs:codelab_md"],
+        "SIDECAR": ["codelab_steps.conf"],
+    },
+    outs = ["codelab_plan.json"],
+    cmd = "$TOOLS --sidecar $SRCS_SIDECAR --out $OUT $SRCS_CODELABS",
+    tools = ["//test/windows/codelab_script"],
+)

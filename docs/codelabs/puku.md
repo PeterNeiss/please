@@ -54,7 +54,7 @@ Define a valid Puku version number as a build configuration string in `.plzconfi
 
 ```
 [BuildConfig]
-puku-version = "1.17.0"
+puku-version = "1.17.1"
 ```
 
 Uncomment and edit the following lines in your `.plzconfig` to set up `please` version:
@@ -78,9 +78,13 @@ With the alias, you can use `plz puku` instead of `plz run //third_party/binary:
 Then download that version of Puku in `third_party/binary/BUILD`:
 
 ```python
+# Windows builds of Puku are published from a fork, and need a name Windows will run.
+PUKU_OWNER = "PeterNeiss" if CONFIG.OS == "windows" else "please-build"
+
 remote_file(
     name = "puku",
-    url = f"https://github.com/please-build/puku/releases/download/v{CONFIG.PUKU_VERSION}/puku-{CONFIG.PUKU_VERSION}-{CONFIG.OS}_{CONFIG.ARCH}",
+    url = f"https://github.com/{PUKU_OWNER}/puku/releases/download/v{CONFIG.PUKU_VERSION}/puku-{CONFIG.PUKU_VERSION}-{CONFIG.OS}_{CONFIG.ARCH}",
+    out = "puku.exe" if CONFIG.OS == "windows" else None,
     binary = True,
 )
 ```
@@ -133,7 +137,16 @@ Or if it's at `/usr/local/go/bin/go`:
 Path = /usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
 ```
 
-**Note:** On Windows, use `where.exe go` to find the Go installation path.
+**On Windows** the default path is empty. The simplest way is to pass your own `PATH` through, which is where your
+terminal finds `go`:
+
+```ini
+[Build]
+PassEnv = PATH
+```
+
+To list a directory instead, find Go with `where.exe go` and give its directory with forward slashes, for example
+`Path = C:/Program Files/Go/bin`.
 
 ### Installing the Go standard library (Go 1.20+)
 
@@ -141,6 +154,12 @@ From Go version 1.20 onwards, the standard library is no longer included by defa
 
 ```bash
 GODEBUG="installgoroot=all" go install std
+```
+
+On Windows, in PowerShell:
+
+```powershell
+$env:GODEBUG = "installgoroot=all"; go install std
 ```
 
 ## Adding and updating modules
@@ -214,10 +233,24 @@ GOTOOLCHAIN=local go get github.com/google/uuid@v1.6.0
 plz puku sync -w
 ```
 
+In PowerShell on Windows:
+
+```powershell
+$env:GOTOOLCHAIN = "local"; go get github.com/google/uuid@v1.6.0
+plz puku sync -w
+```
+
 To update to the latest version:
 
 ```bash
 GOTOOLCHAIN=local go get -u github.com/google/uuid
+plz puku sync -w
+```
+
+In PowerShell on Windows:
+
+```powershell
+$env:GOTOOLCHAIN = "local"; go get -u github.com/google/uuid
 plz puku sync -w
 ```
 

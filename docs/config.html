@@ -649,6 +649,14 @@
           of course can be modified if you need to get binaries from other
           locations.
         </p>
+        <p>
+          On Windows the default is empty, since no directories there hold the
+          tools a build needs. Either pass your own
+          <code class="code">PATH</code> through with
+          <code class="code">passenv = PATH</code>, which makes it part of what
+          builds depend on, or give each directory on its own
+          <code class="code">path =</code> line, written with forward slashes.
+        </p>
       </div>
     </li>
     <li>
@@ -814,6 +822,20 @@
         <h3 class="mt1 f6 lh-title" id="build.paralleldownloads">ParallelDownloads <span class="normal">(int)</span></h3>
 
         <p>{{ index .ConfigHelpText "build.paralleldownloads" }}</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <h3 class="mt1 f6 lh-title" id="build.shell">Shell</h3>
+
+        <p>{{ index .ConfigHelpText "build.shell" }}</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <h3 class="mt1 f6 lh-title" id="build.shellargs">ShellArgs <span class="normal">(repeatable)</span></h3>
+
+        <p>{{ index .ConfigHelpText "build.shellargs" }}</p>
       </div>
     </li>
   </ul>

@@ -9,6 +9,7 @@ import (
 	iofs "io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -28,6 +29,7 @@ import (
 	"github.com/thought-machine/please/src/cli"
 	"github.com/thought-machine/please/src/fs"
 	"github.com/thought-machine/please/src/metrics"
+	"github.com/thought-machine/please/src/process"
 	"github.com/thought-machine/please/src/version"
 )
 
@@ -50,7 +52,8 @@ const LocalConfigFileName string = ".plzconfig.local"
 
 // MachineConfigFileName is the file name for the machine-level config - can use this to override
 // things for a particular machine (e.g. build machine with different caching behaviour).
-const MachineConfigFileName = "/etc/please/plzconfig"
+// This is platform-specific; see config_other.go and config_windows.go.
+var MachineConfigFileName = machineConfigFileName
 
 // UserConfigFileName is the file name for user-specific config (for all their repos).
 const UserConfigFileName = "~/.config/please/plzconfig"
@@ -58,8 +61,9 @@ const UserConfigFileName = "~/.config/please/plzconfig"
 // DefaultPleaseLocation is the default location where Please is installed.
 const DefaultPleaseLocation = "~/.please"
 
-// DefaultPath is the default location please looks for programs in
-var DefaultPath = []string{"/usr/local/bin", "/usr/bin", "/bin"}
+// DefaultPath is the default location please looks for programs in.
+// This is platform-specific; see config_other.go and config_windows.go.
+var DefaultPath = defaultPath
 
 // readConfigFileOnly reads a single config file into the config struct
 func readConfigFileOnly(fs iofs.FS, config *Configuration, filename string, quiet bool) error {
@@ -80,7 +84,7 @@ func readConfigFileOnly(fs iofs.FS, config *Configuration, filename string, quie
 	}
 
 	if gcfg.FatalOnly(err) != nil {
-		return err
+		return configError(filename, err)
 	}
 	if quiet {
 		log.Debug("Error in config file %s: %s", filename, err)
@@ -88,6 +92,17 @@ func readConfigFileOnly(fs iofs.FS, config *Configuration, filename string, quie
 		log.Warning("Error in config file %s: %s", filename, err)
 	}
 	return nil
+}
+
+// configError names the file a config error came from, and for the one mistake people are most
+// likely to make on Windows says what to do about it. A backslash starts an escape sequence in
+// this format, so a path written the way Windows writes it fails to parse, with a message that
+// gives no hint that a path is even involved.
+func configError(filename string, err error) error {
+	if strings.Contains(err.Error(), `unquoted '\'`) {
+		return fmt.Errorf("%s: %w\nA backslash begins an escape sequence here; write paths with forward slashes, which Windows accepts too, or put the value in double quotes", filename, err)
+	}
+	return fmt.Errorf("%s: %w", filename, err)
 }
 
 // readConfigFile reads a single config file into the config struct taking into account
@@ -154,7 +169,7 @@ func defaultGlobalConfigFiles() []string {
 	}
 
 	if xdgConfigDirs := os.Getenv("XDG_CONFIG_DIRS"); xdgConfigDirs != "" {
-		for _, p := range strings.Split(xdgConfigDirs, ":") {
+		for _, p := range fs.SplitPathList(xdgConfigDirs) {
 			if !filepath.IsAbs(p) {
 				continue
 			}
@@ -212,12 +227,15 @@ func ReadConfigFiles(fs iofs.FS, filenames []string, profiles []string) (*Config
 		}
 	}
 
+	// Resolve the full path to Please's own location. This has to happen before the plugin
+	// repo defaults below, which are relative to it. It is idempotent, and the call further
+	// down is left alone.
+	config.EnsurePleaseLocation()
+
 	// Set default values for slices. These add rather than overwriting so we can't set
 	// them upfront as we would with other config values.
-	setDefault(&config.Please.PluginRepo,
-		"https://github.com/{owner}/{plugin}/archive/{revision}.zip",
-		"https://github.com/{owner}/{plugin}-rules/archive/{revision}.zip",
-	)
+	setDefault(&config.Please.PluginRepo, config.defaultPluginRepos()...)
+	config.useBundledTools()
 	if usingBazelWorkspace {
 		setDefault(&config.Parse.BuildFileName, "BUILD.bazel", "BUILD", "BUILD.plz")
 	} else {
@@ -225,6 +243,7 @@ func ReadConfigFiles(fs iofs.FS, filenames []string, profiles []string) (*Config
 	}
 	setBuildPath(&config.Build.Path, config.Build.PassEnv, config.Build.PassUnsafeEnv)
 	setDefault(&config.Build.HashCheckers, "sha1", "sha256", "blake3")
+	setDefault(&config.Build.ShellArgs, process.DefaultShellArgs...)
 	setDefault(&config.Build.PassUnsafeEnv)
 	setDefault(&config.Build.PassEnv)
 	setDefault(&config.Cover.FileExtension, ".go", ".py", ".java", ".tsx", ".ts", ".js", ".cc", ".h", ".c", ".rs")
@@ -288,9 +307,6 @@ func ReadConfigFiles(fs iofs.FS, filenames []string, profiles []string) (*Config
 		}
 	}
 
-	// Resolve the full path to its location.
-	config.EnsurePleaseLocation()
-
 	// If the HTTP proxy config is set and there is no env var overriding it, set it now
 	// so various other libraries will honour it.
 	if config.Build.HTTPProxy != "" {
@@ -347,12 +363,12 @@ func setBuildPath(conf *[]string, passEnv []string, passUnsafeEnv []string) {
 	pathVal := DefaultPath
 	for _, i := range passUnsafeEnv {
 		if i == "PATH" {
-			pathVal = strings.Split(os.Getenv("PATH"), ":")
+			pathVal = fs.SplitPathList(os.Getenv("PATH"))
 		}
 	}
 	for _, i := range passEnv {
 		if i == "PATH" {
-			pathVal = strings.Split(os.Getenv("PATH"), ":")
+			pathVal = fs.SplitPathList(os.Getenv("PATH"))
 		}
 	}
 	setDefault(conf, pathVal...)
@@ -372,7 +388,7 @@ func defaultPathIfExists(conf *string, dir, file string) {
 // DefaultConfiguration returns the default configuration object with no overrides.
 // N.B. Slice fields are not populated by this (since it interferes with reading them)
 func DefaultConfiguration() *Configuration {
-	config := Configuration{buildEnvStored: &storedBuildEnv{}}
+	config := Configuration{buildEnvStored: &storedBuildEnv{}, shellStored: &storedShell{}}
 	config.Please.SelfUpdate = true
 	config.Please.Autoclean = true
 	config.Please.DownloadLocation = "https://get.please.build"
@@ -386,9 +402,10 @@ func DefaultConfiguration() *Configuration {
 	config.Build.Timeout = cli.Duration(10 * time.Minute)
 	config.Build.Config = "opt"         // Optimised builds by default
 	config.Build.FallbackConfig = "opt" // Optimised builds as a fallback on any target that doesn't have a matching one set
-	config.Build.Xattrs = true
+	config.Build.Xattrs = defaultXattrs
 	config.Build.HashFunction = "sha256"
 	config.Build.ParallelDownloads = 4
+	config.Build.Shell = process.DefaultShell
 	config.BuildConfig = map[string]string{}
 	config.BuildEnv = map[string]string{}
 	config.Cache.HTTPWriteable = true
@@ -466,7 +483,7 @@ func DefaultConfiguration() *Configuration {
 	config.Python.PexTool = "/////_please:please_pex"
 	config.Java.JavacWorker = "/////_please:javac_worker"
 	config.Java.JarCatTool = "/////_please:arcat"
-	config.Build.ArcatTool = "/////_please:arcat"
+	config.Build.ArcatTool = DefaultArcatTool
 	config.Java.JUnitRunner = "/////_please:junit_runner"
 
 	config.Metrics.Timeout = cli.Duration(2 * time.Second)
@@ -511,7 +528,7 @@ type Configuration struct {
 	Build   struct {
 		Arch                 cli.Arch     `help:"The target architecture to compile for. Defaults to the host architecture."`
 		Timeout              cli.Duration `help:"Default timeout for build actions. Default is ten minutes."`
-		Path                 []string     `help:"The PATH variable that will be passed to the build processes.\nDefaults to /usr/local/bin:/usr/bin:/bin but of course can be modified if you need to get binaries from other locations." example:"/usr/local/bin:/usr/bin:/bin"`
+		Path                 []string     `help:"The PATH variable that will be passed to the build processes.\nDefaults to /usr/local/bin:/usr/bin:/bin but of course can be modified if you need to get binaries from other locations. On Windows there is no default, and a tool named by a bare name that is not found here, such as wc or sed, runs as the applet of the busybox Please bundles." example:"/usr/local/bin:/usr/bin:/bin"`
 		Config               string       `help:"The build config to use when one is not chosen on the command line. Defaults to opt." example:"opt | dbg"`
 		FallbackConfig       string       `help:"The build config to use when one is chosen and a required target does not have one by the same name. Also defaults to opt." example:"opt | dbg"`
 		Lang                 string       `help:"Sets the language passed to build rules when building. This can be important for some tools (although hopefully not many) - we've mostly observed it with Sass."`
@@ -528,6 +545,8 @@ type Configuration struct {
 		UpdateGitignore      bool         `help:"Whether to automatically update the nearest gitignore with generated sources"`
 		ParallelDownloads    int          `help:"Max number of remote_file downloads to run in parallel."`
 		ArcatTool            string       `help:"Defines the tool used to concatenate files which we use in various build rules. Defaults to Arcat." var:"ARCAT_TOOL"`
+		Shell                string       `help:"The shell that build actions and tests are run in. Defaults to 'bash', which is looked up on Please's PATH; on Windows it defaults to the busybox that Please bundles, since Windows has no system shell that can run a build action." example:"bash | /bin/sh"`
+		ShellArgs            []string     `help:"Arguments passed to the shell before the command to run. Defaults to --noprofile and --norc, which stop bash reading the invoking user's startup files. On Windows the default is 'bash', selecting busybox's shell applet; busybox reads no startup files and rejects those two flags. Note that -u, -o pipefail and (where applicable) -e are always passed and are not configurable here."`
 	} `help:"A config section describing general settings related to building targets in Please.\nSince Please is by nature about building things, this only has the most generic properties; most of the more esoteric properties are configured in their own sections."`
 	BuildConfig map[string]string `help:"A section of arbitrary key-value properties that are made available in the BUILD language. These are often useful for writing custom rules that need some configurable property.\n\n[buildconfig]\nandroid-tools-version = 23.0.2\n\nFor example, the above can be accessed as CONFIG.ANDROID_TOOLS_VERSION."`
 	BuildEnv    map[string]string `help:"A set of extra environment variables to define for build rules. For example:\n\n[buildenv]\nsecret-passphrase = 12345\n\nThis would become SECRET_PASSPHRASE for any rules. These can be useful for passing secrets into custom rules; any variables containing SECRET or PASSWORD won't be logged.\n\nIt's also useful if you'd like internal tools to honour some external variable."`
@@ -691,6 +710,8 @@ type Configuration struct {
 
 	// buildEnvStored is a cached form of BuildEnv.
 	buildEnvStored *storedBuildEnv
+	// shellStored is a cached form of Shell().
+	shellStored *storedShell
 
 	FeatureFlags struct {
 	} `help:"Flags controlling preview features for the next release. Typically these config options gate breaking changes and only have a lifetime of one major release."`
@@ -742,6 +763,62 @@ type storedBuildEnv struct {
 	Once sync.Once
 }
 
+type storedShell struct {
+	Shell string
+	Once  sync.Once
+}
+
+// Shell returns the shell that build actions, tests and the command cache run in.
+//
+// A bare name is left for the OS to resolve on Please's own PATH, as it always has been. The
+// exception is when it isn't there at all: then we look on the build path, which includes
+// Please's own install directory. That is how the shell Please bundles on Windows gets found,
+// since nothing puts that directory on the user's PATH.
+func (config *Configuration) Shell() string {
+	if config.shellStored == nil {
+		// A Configuration built by hand rather than through DefaultConfiguration; nothing to
+		// cache in, so just work it out each time.
+		return config.resolveShell()
+	}
+	config.shellStored.Once.Do(func() {
+		config.shellStored.Shell = config.resolveShell()
+	})
+	return config.shellStored.Shell
+}
+
+// ShellArgs returns the arguments passed to the shell before the command itself.
+// A Configuration built by hand has none set - the defaults for a repeatable key can only be
+// applied after parsing, or they would be appended to rather than replaced - so the platform
+// default stands in.
+func (config *Configuration) ShellArgs() []string {
+	if len(config.Build.ShellArgs) == 0 {
+		return process.DefaultShellArgs
+	}
+	return config.Build.ShellArgs
+}
+
+func (config *Configuration) resolveShell() string {
+	shell := config.Build.Shell
+	if shell == "" {
+		return process.DefaultShell
+	} else if filepath.IsAbs(shell) || strings.ContainsRune(shell, filepath.Separator) {
+		return shell
+	} else if _, err := exec.LookPath(shell); err == nil {
+		return shell
+	} else if path, err := LookPath(shell, config.Path()); err == nil {
+		return path
+	} else if exe, err := fs.Executable(); err == nil {
+		// Last resort: next to the binary that is running. That is where a bundled shell sits
+		// in an install, and unlike the build path above it doesn't depend on Please.Location
+		// having been resolved yet.
+		if path, err := LookPath(shell, []string{filepath.Dir(exe)}); err == nil {
+			return path
+		}
+	}
+	// Leave it as it is; the exec will fail with a better message than anything we'd write.
+	return shell
+}
+
 // Hash returns a hash of the parts of this configuration that affect building targets in general.
 // Most parts are considered not to (e.g. cache settings) or affect specific targets (e.g. changing
 // tool paths which get accounted for on the targets that use them).
@@ -771,10 +848,45 @@ func (config *Configuration) GetBuildEnv() BuildEnv {
 	config.buildEnvStored.Once.Do(func() {
 		config.buildEnvStored.Env = config.getBuildEnv(true, true)
 		if path, present := config.buildEnvStored.Env["PATH"]; present {
-			config.buildEnvStored.Path = strings.Split(path, ":")
+			config.buildEnvStored.Path = fs.SplitPathList(path)
 		}
 	})
 	return config.buildEnvStored.Env
+}
+
+// DefaultArcatTool is the [build] arcattool that means "whichever one Please downloads".
+// parse.ArcatUnavailable recognises it, to say something useful on a platform where there is
+// nothing to download.
+// The literal is parse.InternalPackageName, which core cannot import; parse asserts they agree.
+const DefaultArcatTool = "/////_please:arcat"
+
+// defaultPluginRepos returns the templates a plugin_repo() is resolved against when nothing is
+// configured. Setting any [please] pluginrepo replaces the whole list, as it always has.
+func (config *Configuration) defaultPluginRepos() []string {
+	return []string{
+		"https://github.com/{owner}/{plugin}/archive/{revision}.zip",
+		"https://github.com/{owner}/{plugin}-rules/archive/{revision}.zip",
+	}
+}
+
+// useBundledTools points the config at any helper tool the release bundles beside the binary,
+// where nothing else has been configured.
+//
+// This is only arcat. The plugins' own tools - please_go, please_cc, please_pex - are chosen by
+// the plugins' build defs, because a plugin's config is not ours to default.
+//
+// Only Windows bundles anything. Everywhere else there is a published arcat to download, and
+// the internal package rule is the better answer because it is hashed and cached like anything
+// else.
+func (config *Configuration) useBundledTools() {
+	if runtime.GOOS != "windows" || config.Build.ArcatTool != DefaultArcatTool {
+		return
+	}
+	if fs.FileExists(filepath.Join(config.Please.Location, "arcat"+fs.ExeSuffix)) {
+		// A bare name rather than a path: Please.Location is already the head of the build
+		// PATH, and the lookup adds the .exe. The same route the bundled busybox takes.
+		config.Build.ArcatTool = "arcat"
+	}
 }
 
 // EnsurePleaseLocation will resolve `config.Please.Location` to a full path location where it is to be found.
@@ -823,7 +935,7 @@ func (config *Configuration) getBuildEnv(includePath bool, includeUnsafe bool) B
 			if v, isSet := os.LookupEnv(k); isSet {
 				if k == "PATH" {
 					// plz's install location always needs to be on the path.
-					v = config.Please.Location + ":" + v
+					v = config.Please.Location + string(os.PathListSeparator) + v
 					includePath = false // skip this in a bit
 				}
 				env[k] = v
@@ -842,7 +954,7 @@ func (config *Configuration) getBuildEnv(includePath bool, includeUnsafe bool) B
 		// but really external environment variables shouldn't affect this.
 		// The only concession is that ~ is expanded as the user's home directory
 		// in PATH entries.
-		env["PATH"] = strings.Join(append([]string{config.Please.Location}, config.Build.Path...), ":")
+		env["PATH"] = strings.Join(append([]string{config.Please.Location}, config.Build.Path...), string(os.PathListSeparator))
 	}
 	return env
 }

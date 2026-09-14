@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
-	"path/filepath"
+	"path"
 	"sync"
 
 	"github.com/thought-machine/please/src/build"
@@ -159,7 +159,7 @@ func makeJSONTarget(state *core.BuildState, target *core.BuildTarget) JSONTarget
 		t.Inputs = append(t.Inputs, in)
 	}
 	for _, out := range target.Outputs(state.Graph) {
-		t.Outputs = append(t.Outputs, filepath.Join(target.Label.PackageName, out))
+		t.Outputs = append(t.Outputs, path.Join(target.Label.PackageName, out))
 	}
 	deps, unresolved := target.Dependencies(state.Graph)
 	if len(unresolved) > 0 {

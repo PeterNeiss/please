@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,7 +18,9 @@ import (
 )
 
 func TestPlzConfigWorking(t *testing.T) {
-	RepoRoot = "/repo/root"
+	// A genuinely absolute path: on Windows a leading slash isn't one without a drive letter,
+	// so the location below would be resolved relative to the repo root a second time.
+	RepoRoot = filepath.Join(t.TempDir(), "repo", "root")
 	config, err := ReadConfigFiles(fs.HostFS, []string{"src/core/test_data/working.plzconfig"}, nil)
 
 	assert.NoError(t, err)
@@ -28,7 +31,16 @@ func TestPlzConfigWorking(t *testing.T) {
 	assert.Equal(t, "8", config.Java.SourceLevel)
 	assert.Equal(t, "7", config.Java.TargetLevel)
 	assert.Equal(t, "10", config.Java.ReleaseLevel)
-	assert.Equal(t, "/repo/root/plz-out/please", config.Please.Location)
+	assert.Equal(t, filepath.Join(RepoRoot, "plz-out", "please"), config.Please.Location)
+}
+
+func TestPlzConfigBackslash(t *testing.T) {
+	// The mistake a Windows user makes first. The parser's own message says nothing about
+	// paths, so check we name the file and say what to do instead.
+	_, err := ReadConfigFiles(fs.HostFS, []string{"src/core/test_data/backslash.plzconfig"}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "backslash.plzconfig")
+	assert.Contains(t, err.Error(), "forward slashes")
 }
 
 func TestPlzConfigFailing(t *testing.T) {
@@ -157,22 +169,26 @@ func TestConfigOverrideOptions(t *testing.T) {
 }
 
 func TestPleaseRelativeLocationOverride(t *testing.T) {
-	RepoRoot = "/repo/root"
+	RepoRoot = filepath.Join(t.TempDir(), "repo", "root")
 	config := DefaultConfiguration()
 
 	err := config.ApplyOverrides(map[string]string{"please.location": "./plz-out/please"})
 	assert.NoError(t, err)
-	assert.Equal(t, "/repo/root/plz-out/please", config.Please.Location)
+	assert.Equal(t, filepath.Join(RepoRoot, "plz-out", "please"), config.Please.Location)
 }
 
 func TestPleaseTildeLocationOverride(t *testing.T) {
-	t.Setenv("HOME", "/path/to/home")
+	// USERPROFILE as well as HOME: os.UserHomeDir reads the former on Windows.
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	config := DefaultConfiguration()
 
 	err := config.ApplyOverrides(map[string]string{"please.location": "~/please-location"})
 	assert.NoError(t, err)
-	assert.Equal(t, "/path/to/home/please-location", config.Please.Location)
+	// Only the ~ is substituted, so the separator the user wrote survives as they wrote it.
+	assert.Equal(t, home+"/please-location", config.Please.Location)
 }
 
 func TestReadSemver(t *testing.T) {
@@ -258,13 +274,20 @@ func TestUnknownHashChecker(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// buildPath returns the PATH a config should produce: Please's own location, then the build
+// path. Both of those are platform-specific - there is no default build path at all on Windows
+// - so it's computed rather than written out.
+func buildPath(config *Configuration) string {
+	return strings.Join(append([]string{config.Please.Location}, config.Build.Path...), string(os.PathListSeparator))
+}
+
 func TestBuildEnvSection(t *testing.T) {
 	config, err := ReadConfigFiles(fs.HostFS, []string{"src/core/test_data/buildenv.plzconfig"}, nil)
 	assert.NoError(t, err)
 	expected := BuildEnv{
 		"BAR_BAR": "first",
 		"FOO_BAR": "second",
-		"PATH":    os.Getenv("TMP_DIR") + ":/usr/local/bin:/usr/bin:/bin",
+		"PATH":    buildPath(config),
 	}
 	assert.EqualValues(t, expected, config.GetBuildEnv())
 }
@@ -277,7 +300,7 @@ func TestPassEnv(t *testing.T) {
 	expected := BuildEnv{
 		"BAR":  "second",
 		"FOO":  "first",
-		"PATH": os.Getenv("TMP_DIR") + ":" + os.Getenv("PATH"),
+		"PATH": buildPath(config),
 	}
 	assert.EqualValues(t, expected, config.GetBuildEnv())
 }
@@ -290,7 +313,7 @@ func TestPassUnsafeEnv(t *testing.T) {
 	expected := BuildEnv{
 		"BAR":  "second",
 		"FOO":  "first",
-		"PATH": os.Getenv("TMP_DIR") + ":" + os.Getenv("PATH"),
+		"PATH": buildPath(config),
 	}
 	assert.EqualValues(t, expected, config.GetBuildEnv())
 }
@@ -316,7 +339,7 @@ func TestPassUnsafeEnvExcludedFromHash(t *testing.T) {
 func TestBuildPathWithPathEnv(t *testing.T) {
 	config, err := ReadConfigFiles(fs.HostFS, []string{"src/core/test_data/passenv.plzconfig"}, nil)
 	assert.NoError(t, err)
-	assert.Equal(t, config.Build.Path, strings.Split(os.Getenv("PATH"), ":"))
+	assert.Equal(t, config.Build.Path, fs.SplitPathList(os.Getenv("PATH")))
 }
 
 func TestUpdateArgsWithAliases(t *testing.T) {
@@ -415,29 +438,56 @@ func TestGetTags(t *testing.T) {
 }
 
 func TestEnsurePleaseLocation(t *testing.T) {
-	t.Setenv("HOME", "/path/to/home")
+	// The home directory is read through os.UserHomeDir, which looks at a different variable
+	// on Windows, and the paths below have to be genuinely absolute to be recognised as such
+	// there - a leading slash isn't enough without a drive letter.
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	config := DefaultConfiguration()
 
 	// Empty please location config resolves to this executable's directory
 	config.Please.Location = ""
 	config.EnsurePleaseLocation()
-	assert.Equal(t, os.Getenv("PWD"), config.Please.Location)
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	assert.Equal(t, wd, config.Please.Location)
 
 	// Expands ~
 	config.Please.Location = "~"
 	config.EnsurePleaseLocation()
-	assert.Equal(t, "/path/to/home", config.Please.Location)
+	assert.Equal(t, home, config.Please.Location)
 
 	// Resolves relative path to repo root
-	RepoRoot = "/repo/root"
+	RepoRoot = filepath.Join(t.TempDir(), "repo", "root")
 	config.Please.Location = "./plz-out/please"
 	config.EnsurePleaseLocation()
-	assert.Equal(t, "/repo/root/plz-out/please", config.Please.Location)
+	assert.Equal(t, filepath.Join(RepoRoot, "plz-out", "please"), config.Please.Location)
 }
 
 func TestPluginConfig(t *testing.T) {
 	config, err := ReadConfigFiles(fs.HostFS, []string{"src/core/test_data/plugin.plzconfig"}, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"fooc"}, config.Plugin["foo"].ExtraValues["fooctool"])
+}
+
+func TestDefaultPluginRepos(t *testing.T) {
+	// The URL list is hashed into every plugin download's rule hash, so an entry added here
+	// moves build hashes on every platform at once. It is the same list everywhere, and was
+	// briefly not: a Windows release used to carry its plugins and point at them with a
+	// file:// template, which is gone now that they are downloadable like anything else.
+	repos := DefaultConfiguration().defaultPluginRepos()
+	assert.Len(t, repos, 2)
+	for _, repo := range repos {
+		assert.True(t, strings.HasPrefix(repo, "https://github.com/"), repo)
+	}
+}
+
+func TestUseBundledToolsLeavesAConfiguredArcatAlone(t *testing.T) {
+	config := DefaultConfiguration()
+	config.Please.Location = "/opt/please"
+	config.Build.ArcatTool = "//my/own:arcat"
+	config.useBundledTools()
+	assert.Equal(t, "//my/own:arcat", config.Build.ArcatTool)
 }

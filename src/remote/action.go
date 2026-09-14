@@ -129,7 +129,7 @@ func (c *Client) buildCommand(target *core.BuildTarget, inputRoot *pb.Directory,
 	cmd, err := core.ReplaceSequences(state, target, cmd)
 	return &pb.Command{
 		Platform:             c.targetPlatformProperties(target), //nolint:staticcheck
-		Arguments:            process.BashCommand(c.shellPath, commandPrefixBuilder.String()+cmd, state.Config.Build.ExitOnError),
+		Arguments:            process.RemoteBashCommand(c.shellPath, commandPrefixBuilder.String()+cmd, state.Config.Build.ExitOnError),
 		EnvironmentVariables: c.buildEnv(target, c.stampedBuildEnvironment(state, target, inputRoot, stamp, isTest || isRun), target.Sandbox),
 		OutputPaths:          outs,
 	}, err
@@ -169,7 +169,7 @@ func (c *Client) buildTestCommand(state *core.BuildState, target *core.BuildTarg
 				},
 			},
 		},
-		Arguments:            process.BashCommand(c.shellPath, commandPrefix+cmd, state.Config.Build.ExitOnError),
+		Arguments:            process.RemoteBashCommand(c.shellPath, commandPrefix+cmd, state.Config.Build.ExitOnError),
 		EnvironmentVariables: c.buildEnv(nil, core.TestEnvironment(state, target, ".", run), target.Test.Sandbox),
 		OutputPaths:          paths,
 	}, err
@@ -587,7 +587,9 @@ func (c *Client) buildEnv(target *core.BuildTarget, env core.BuildEnv, sandbox b
 		if name == "PATH" {
 			// Strip out anything prefixed with the local user's home directory; it can't be
 			// useful remotely but will affect determinism of the action.
-			parts := strings.Split(v, ":")
+			// Note the asymmetry: we split with the local separator because the value was
+			// built locally, but rejoin with ":" because the worker is a POSIX machine.
+			parts := fs.SplitPathList(v)
 			replaced := make([]string, 0, len(parts))
 			for _, part := range parts {
 				if part != c.state.Config.Please.Location && !strings.HasPrefix(part, c.userHome) {

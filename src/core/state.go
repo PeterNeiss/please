@@ -13,6 +13,7 @@ import (
 	iofs "io/fs"
 	"iter"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -871,11 +872,18 @@ func newXXHash() hash.Hash {
 }
 
 func executorFromConfig(config *Configuration) *process.Executor {
+	wantsSandbox := config.Sandbox.Build || config.Sandbox.Test
+	if wantsSandbox && !sandboxSupported() {
+		// Saying the tool is missing would be misleading here - there is nothing to install.
+		log.Warningf("Sandboxing is not implemented on %s; build actions and tests will run without isolation.", runtime.GOOS)
+		return process.NewSandboxingExecutor(false, process.NamespaceNever, "", config.Shell(), config.ShellArgs())
+	}
+
 	tool := config.Sandbox.Tool
 	if !filepath.IsAbs(tool) {
 		var err error
 		tool, err = LookBuildPath(tool, config)
-		if err != nil && (config.Sandbox.Build || config.Sandbox.Test) {
+		if err != nil && wantsSandbox {
 			log.Warningf("Can't find sandbox tool %v on the path: %v", config.Sandbox.Tool, err)
 		}
 	} else if !fs.FileExists(tool) {
@@ -883,9 +891,11 @@ func executorFromConfig(config *Configuration) *process.Executor {
 	}
 
 	return process.NewSandboxingExecutor(
-		config.Sandbox.Tool == "" && (config.Sandbox.Build || config.Sandbox.Test),
+		config.Sandbox.Tool == "" && wantsSandbox,
 		process.NamespacingPolicy(config.Sandbox.Namespace),
 		tool,
+		config.Shell(),
+		config.ShellArgs(),
 	)
 }
 

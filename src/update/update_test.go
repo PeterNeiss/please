@@ -1,6 +1,8 @@
 package update
 
 import (
+	"archive/zip"
+	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -31,8 +33,13 @@ func (*fakeLogBackend) Log(level logging.Level, calldepth int, rec *logging.Reco
 }
 
 func TestVerifyNewPlease(t *testing.T) {
-	assert.True(t, verifyNewPlease("src/please", version.PleaseVersion))
-	assert.False(t, verifyNewPlease("src/please", "wibble"))
+	// Windows decides what it can run by extension, so the binary is named with one there.
+	please := "src/please"
+	if runtime.GOOS == "windows" {
+		please += ".exe"
+	}
+	assert.True(t, verifyNewPlease(please, version.PleaseVersion))
+	assert.False(t, verifyNewPlease(please, "wibble"))
 	assert.False(t, verifyNewPlease("wibble", version.PleaseVersion))
 }
 
@@ -66,7 +73,9 @@ func TestDownloadNewPlease(t *testing.T) {
 	c := makeConfig("downloadnewplease")
 	downloadPlease(c, false, true)
 	// Should have written new file
-	assert.True(t, core.PathExists(filepath.Join(c.Please.Location, c.Please.Version.String(), "please")))
+	// pleaseExeName rather than "please": the downloaded binary needs the extension on Windows
+	// or nothing will run it.
+	assert.True(t, core.PathExists(filepath.Join(c.Please.Location, c.Please.Version.String(), pleaseExeName)))
 	// Should not have written this yet though
 	assert.False(t, core.PathExists(filepath.Join(c.Please.Location, "please")))
 	// Panics because it's not a valid .tar.gz
@@ -78,6 +87,35 @@ func TestDownloadNewPlease(t *testing.T) {
 	// Panics because invalid URL
 	c.Please.DownloadLocation = "notaurl"
 	assert.Panics(t, func() { downloadPlease(c, false, true) })
+}
+
+func TestReleaseExt(t *testing.T) {
+	var v cli.Version
+	v.UnmarshalFlag("16.2.0")
+	assert.Equal(t, "", releaseExt(v, "linux"))
+	assert.Equal(t, ".zip", releaseExt(v, "windows"))
+	v.UnmarshalFlag("13.1.9")
+	assert.Equal(t, ".tar.xz", releaseExt(v, "linux"))
+}
+
+func TestDownloadWindowsRelease(t *testing.T) {
+	// A Windows release is a zip of the whole install, and all of it has to arrive: please.exe
+	// depends on what ships beside it. Fetched explicitly, so this runs on every platform.
+	c := makeConfig("downloadwindowsrelease")
+	downloadPleaseFor(c, "windows", false, false)
+	dir := filepath.Join(c.Please.Location, c.Please.Version.String())
+	assert.True(t, core.PathExists(filepath.Join(dir, "please.exe")))
+	assert.True(t, core.PathExists(filepath.Join(dir, "plz.cmd")))
+	assert.False(t, core.PathExists(filepath.Join(dir, "please")), "the zip's top-level directory should be stripped")
+}
+
+func TestCopyZipFileRejectsBadZips(t *testing.T) {
+	dir := t.TempDir()
+	assert.Panics(t, func() { copyZipFile(bytes.NewReader([]byte("notazip")), dir, "notazip.zip") })
+	// Nothing in a release may end up outside the directory it is being installed into.
+	escaping := makeReleaseZip(map[string]string{"please/../escaped": "nope"})
+	assert.Panics(t, func() { copyZipFile(bytes.NewReader(escaping), dir, "escaping.zip") })
+	assert.False(t, core.PathExists(filepath.Join(filepath.Dir(dir), "escaped")))
 }
 
 func TestShouldUpdateVersionsMatch(t *testing.T) {
@@ -172,11 +210,48 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			panic(err)
 		}
 		w.Write(b)
+	} else if r.URL.Path == releaseZipPath(runtime.GOOS, pleaseVersion().String()) || r.URL.Path == releaseZipPath(runtime.GOOS, "42.0.0") || r.URL.Path == releaseZipPath("windows", "42.0.0") {
+		b, err := os.ReadFile("src/update/please_test")
+		if err != nil {
+			panic(err)
+		}
+		w.Write(makeReleaseZip(map[string]string{
+			"please/please.exe": string(b),
+			"please/plz.cmd":    "@please.exe %*\r\n",
+		}))
 	} else if r.URL.Path == fmt.Sprintf("/%s_%s/1.0.0/please_1.0.0.tar.gz", runtime.GOOS, runtime.GOARCH) {
 		w.Write([]byte("notatarball"))
 	} else {
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+// releaseZipPath returns where the fake server serves a release zip, the way a Windows one is published.
+func releaseZipPath(goos, version string) string {
+	return fmt.Sprintf("/%s_%s/%s/please_%s.zip", goos, runtime.GOARCH, version, version)
+}
+
+// makeReleaseZip builds a zip laid out like a Windows release: everything under a top-level please/,
+// with an entry for that directory as the real one has.
+func makeReleaseZip(files map[string]string) []byte {
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	if _, err := w.Create("please/"); err != nil {
+		panic(err)
+	}
+	for name, content := range files {
+		f, err := w.Create(name)
+		if err != nil {
+			panic(err)
+		}
+		if _, err := f.Write([]byte(content)); err != nil {
+			panic(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
 }
 
 func makeConfig(dir string) *core.Configuration {

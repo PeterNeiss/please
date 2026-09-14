@@ -283,7 +283,9 @@ func (hasher *PathHasher) timestampHash(h hash.Hash, filename string) error {
 // This is important for getting best performance from memoizing the path hashes.
 func (hasher *PathHasher) ensureRelative(path string) string {
 	if strings.HasPrefix(path, hasher.root) {
-		return strings.TrimLeft(strings.TrimPrefix(path, hasher.root), "/")
+		// Either separator: on Windows an absolute path under the root continues with a backslash,
+		// and leaving one on makes it absolute again, to the root of the drive.
+		return strings.TrimLeft(strings.TrimPrefix(path, hasher.root), PathSeparators)
 	}
 	return path
 }

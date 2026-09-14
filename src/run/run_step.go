@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -131,7 +130,7 @@ func run(ctx context.Context, state *core.BuildState, label core.AnnotatedOutput
 	case overrideCmd != "":
 		command, _ := core.ReplaceSequences(state, target, overrideCmd)
 		// We don't care about passed in args when an override command is provided
-		args = process.BashCommand("bash", strings.Trim(command, "\""), true)
+		args = state.ProcessExecutor.BashCommand(strings.Trim(command, "\""), true)
 	case label.Annotation != "":
 		entryPoint, ok := target.EntryPoints[label.Annotation]
 		if !ok {
@@ -157,11 +156,11 @@ func run(ctx context.Context, state *core.BuildState, label core.AnnotatedOutput
 	}
 
 	// Handle targets where $(exe ...) returns something nontrivial
-	if !strings.Contains(args[0], "/") {
+	if !strings.Contains(args[0], "/") && !strings.ContainsRune(args[0], filepath.Separator) {
 		// Probably it's a java -jar, we need an absolute path to it.
 		cmd, err := exec.LookPath(args[0])
 		if err != nil {
-			log.Fatalf("Can't find binary %s", args[0])
+			log.Fatalf("Can't find binary %s%s", args[0], fs.ExplainUnrunnable(args[0]))
 		}
 		args[0] = cmd
 	} else if dir != "" { // Find an absolute path before changing directory
@@ -172,19 +171,29 @@ func run(ctx context.Context, state *core.BuildState, label core.AnnotatedOutput
 		args[0] = abs
 	}
 
+	// The path Please built is slash-separated, and on Windows that is not merely untidy. A
+	// .cmd - which is what an sh_binary is there - runs through cmd.exe, and cmd.exe reads a
+	// forward slash as the start of a switch: plz-out/bin/x.cmd is the command "plz-out" with
+	// two switches, and it says so. Wine's cmd is more forgiving, which is why this only
+	// showed up on a real machine.
+	args[0] = filepath.FromSlash(args[0])
+	// Windows cannot start a #! script by name at all; an sh or bash one runs through the shell
+	// build actions use instead. Everywhere else this leaves args alone.
+	args = withScriptShell(state.Config, args)
+
 	log.Info("Running target %s...", strings.Join(args, " "))
 	output.SetWindowTitle("plz run: " + strings.Join(args, " "))
 	env := environ(state, target, setenv, tmpDir)
 
 	if !fork {
 		if dir != "" {
-			err := syscall.Chdir(dir)
+			err := os.Chdir(dir)
 			if err != nil {
 				log.Fatalf("Error changing directory %s: %s", dir, err)
 			}
 		}
 		// Plain 'plz run'. One way or another we never return from the following line.
-		must(syscall.Exec(args[0], args, env), args)
+		must(process.ExecReplace(args[0], args, env), args)
 	} else if detach {
 		// Bypass the whole process management system since we explicitly aim not to manage this subprocess.
 		cmd := exec.Command(args[0], args[1:]...)
@@ -251,8 +260,11 @@ func addEnv(env []string, e core.BuildEnv) []string {
 
 func addOneEnv(env []string, k, v string) []string {
 	for i, existing := range env {
-		if strings.HasPrefix(existing, k+"=") {
-			env[i] = k + "=" + v
+		if name, _, ok := strings.Cut(existing, "="); ok && envNamesEqual(name, k) {
+			// The OS's own spelling of the name is kept, not ours. On Windows they differ -
+			// PATH is stored as Path - and rewriting it here would leave two entries for one
+			// variable in anything that reads this slice without deduplicating.
+			env[i] = name + "=" + v
 			return env
 		}
 	}
@@ -262,7 +274,7 @@ func addOneEnv(env []string, k, v string) []string {
 // must dies if the given error is non-nil.
 func must(err error, cmd []string) {
 	if err != nil {
-		log.Fatalf("Error running command %s: %s", strings.Join(cmd, " "), err)
+		log.Fatalf("Error running command %s: %s%s", strings.Join(cmd, " "), err, fs.ExplainUnrunnable(cmd[0]))
 	}
 }
 
@@ -272,11 +284,7 @@ func toExitError(err error, cmd []string, out []byte) error {
 	if err == nil {
 		return nil
 	} else if exitError, ok := err.(*exec.ExitError); ok {
-		// This is a little hairy; there isn't a good way of getting the exit code,
-		// but this should be reasonably portable (at least to the platforms we care about).
-		if status, ok := exitError.Sys().(syscall.WaitStatus); ok {
-			exitCode = status.ExitStatus()
-		}
+		exitCode = exitError.ExitCode()
 	}
 	return &exitError{
 		msg:  fmt.Sprintf("Error running command %s: %s\n%s", strings.Join(cmd, " "), err, string(out)),

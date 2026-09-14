@@ -1,0 +1,20 @@
+# Codelab steps known to fail on Windows. One "codelab_id" or "codelab_id::step-key" per line,
+# with a comment above saying why. Step keys are printed by run_codelabs.ps1 and by
+# //test/windows:codelab_plan.
+#
+# A step listed here that starts passing fails the job too, so this list only ever shrinks. An
+# entry naming a step that no longer exists fails on Linux, in
+# //test/windows/codelab_script/script:script_test.
+#
+# This file records what the codelabs do on Windows. Where a codelab has been fixed, the entry left
+# with the fix, in the same commit; what remains here is what still does not work as written.
+#
+# Every entry rests either on a fact checked directly, or on what a native run printed, quoted in
+# its reason. Nothing is guessed at: a wrong guess fails the job exactly as a missing entry does.
+
+# Not a Windows failure. plz init plugin go generates third_party/go/BUILD with a go_toolchain and a
+# go_stdlib, and points STDLib at the stdlib. The codelab's "Add a go toolchain" block holds only a
+# go_toolchain: written as the file it replaces the go_stdlib, and appended it would define a second
+# target named toolchain. The second native run stopped here with //third_party/go:std missing. The
+# k8s codelab is outside the Windows fixes and is unedited, so this still fails on every platform.
+k8s::using-our-base-image/b3.1

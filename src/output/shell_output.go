@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -438,14 +439,16 @@ func printTempDirs(state *core.BuildState, duration time.Duration, shell, shellR
 			log.Errorf("Error pre-processing command: %s", err.Error())
 		}
 		env["CMD"] = cmd
-		fmt.Printf("  %s: %s\n", label, dir)
+		// Slash-separated: this is the directory someone pastes into the shell we are about to
+		// open, where a backslash is an escape character rather than a separator.
+		fmt.Printf("  %s: %s\n", label, filepath.ToSlash(dir))
 		fmt.Printf("    Command: %s\n", cmd)
 		if !shell {
 			// This isn't very useful if we're opening a shell (since then the vars will be set anyway)
 			fmt.Printf("   Expanded: %s\n", os.Expand(cmd, env.ReplaceEnvironment))
 		} else {
 			fmt.Printf("\n")
-			argv := []string{"bash", "--noprofile", "--norc", "-o", "pipefail"}
+			argv := state.ProcessExecutor.InteractiveShellCommand()
 			if shellRun {
 				argv = append(argv, "-c", cmd)
 			}
@@ -457,7 +460,7 @@ func printTempDirs(state *core.BuildState, duration time.Duration, shell, shellR
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			// TODO(jpoole): Read the docs. Attaching stdin and out doesn't seem to work with this.
-			cmd.SysProcAttr.Setpgid = false
+			process.ShareParentProcessGroup(cmd)
 			cmd.Run() // Ignore errors, it will typically end by the user killing it somehow.
 		}
 	}
@@ -467,10 +470,12 @@ func buildResult(state *core.BuildState, target *core.BuildTarget) []string {
 	results := []string{}
 	if target != nil {
 		for _, out := range target.Outputs(state.Graph) {
+			// Slash-separated: these are printed for a person to read and paste into a
+			// command, where a backslash would be an escape character rather than a separator.
 			if core.StartedAtRepoRoot() {
-				results = append(results, filepath.Join(target.OutDir(), out))
+				results = append(results, path.Join(target.OutDir(), out))
 			} else {
-				results = append(results, filepath.Join(core.RepoRoot, target.OutDir(), out))
+				results = append(results, filepath.ToSlash(filepath.Join(core.RepoRoot, target.OutDir(), out)))
 			}
 		}
 	}

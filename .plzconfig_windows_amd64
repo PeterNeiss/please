@@ -1,0 +1,19 @@
+; Per-architecture config for windows_amd64, layered on .plzconfig by
+; state.ForArch(). See docs/design/windows/ for the design notes behind these.
+
+[Plugin "go"]
+; go-flags treats '/' as its option delimiter and ':' as its name/argument
+; delimiter on Windows, which collides with Please's own label syntax:
+; //pkg:target parses as option /pkg with argument target. The forceposix tag
+; disables that behaviour. Without it every command taking a build label is
+; broken. See docs/design/windows/00-overview.md, decision D5.
+BuildTags = forceposix
+
+[build]
+; Windows has no extended attributes; fall back to the sidecar-file mechanism.
+xattrs = false
+
+[sandbox]
+; No mount/network namespace equivalent yet. See M7.
+build = false
+test = false

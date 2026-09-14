@@ -4,9 +4,15 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/thought-machine/please/src/fs"
 )
 
 func TestCollapseHash(t *testing.T) {
@@ -118,29 +124,49 @@ func TestInitialPackageUpToRoot(t *testing.T) {
 	assert.Equal(t, []BuildLabel{{PackageName: "", Name: "..."}}, p)
 }
 
+// writeFakeTool creates an executable named tool, plus whatever extension the platform needs
+// to consider it one, in a new directory, and returns the directory and the full path.
+func writeFakeTool(t *testing.T, tool string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	file := filepath.Join(dir, tool+fs.ExeSuffix)
+	require.NoError(t, os.WriteFile(file, nil, 0o755))
+	return dir, file
+}
+
 func TestLookPath(t *testing.T) {
-	// Assume this will be present on the path somewhere (you've really got to have bash for plz)
-	path, err := LookPath("bash", []string{"/usr/local/bin", "/usr/bin", "/bin"})
-	assert.NoError(t, err)
-	assert.Contains(t, []string{"/usr/local/bin/bash", "/usr/bin/bash", "/bin/bash"}, path)
-	info, err := os.Stat(path)
-	assert.NoError(t, err)
-	assert.Equal(t, "bash", info.Name())
+	// A tool we put there ourselves, rather than something the host is assumed to have: the
+	// directories Please looks in by default differ per platform, and on Windows there are none.
+	dir, file := writeFakeTool(t, "plz_look_path_test")
+	found, err := LookPath("plz_look_path_test", []string{filepath.Join(dir, "nonexistent"), dir})
+	require.NoError(t, err)
+	assert.Equal(t, file, found)
 }
 
 func TestLookPathColons(t *testing.T) {
-	// We support having colons inside the path elements because people might find that more natural.
-	path, err := LookPath("bash", []string{"/usr/local/bin:/usr/bin:/bin"})
-	assert.NoError(t, err)
-	assert.Contains(t, []string{"/usr/local/bin/bash", "/usr/bin/bash", "/bin/bash"}, path)
-	info, err := os.Stat(path)
-	assert.NoError(t, err)
-	assert.Equal(t, "bash", info.Name())
+	// We support having the list separator inside the path elements because people might find
+	// that more natural.
+	dir, file := writeFakeTool(t, "plz_look_path_test")
+	joined := strings.Join([]string{filepath.Join(dir, "nonexistent"), dir}, string(os.PathListSeparator))
+	found, err := LookPath("plz_look_path_test", []string{joined})
+	require.NoError(t, err)
+	assert.Equal(t, file, found)
 }
 
 func TestLookPathDoesntExist(t *testing.T) {
-	_, err := LookPath("wibblewobbleflibble", []string{"/usr/local/bin", "/usr/bin", "/bin"})
+	dir, _ := writeFakeTool(t, "plz_look_path_test")
+	_, err := LookPath("wibblewobbleflibble", []string{dir, t.TempDir()})
 	assert.Error(t, err)
+	assert.NotContains(t, err.Error(), "No [build] path", "shouldn't advise configuring a path that is configured")
+}
+
+func TestLookPathWithNothingConfigured(t *testing.T) {
+	// Only Please's own directory to search, which is what a Windows user gets before they set
+	// [build] path - there is no default one there. Say so rather than just naming the one
+	// directory we looked in.
+	_, err := LookPath("wibblewobbleflibble", []string{t.TempDir()})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "No [build] path is configured")
 }
 
 // buildGraph builds a test graph which we use to test IterSources etc.
@@ -179,4 +205,73 @@ func makeTarget4(graph *BuildGraph, label string, deps ...string) *BuildTarget {
 	})
 	target.AddOutput(target.Label.Name + ".a")
 	return target
+}
+
+func TestFindRepoRootFromTerminatesAtTheRoot(t *testing.T) {
+	// A walk that reaches the top of the filesystem without finding a marker has to stop.
+	// On Windows it used not to: trimming the separator off "C:\" leaves "C:", and splitting
+	// that returns it unchanged, so this spun for ever at one stat per iteration and every plz
+	// run outside a repo hung instead of reporting that it could not find a root.
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	root := filepath.VolumeName(wd) + string(filepath.Separator)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		dir, pkg := findRepoRootFrom(root, "a_file_that_is_not_there_"+t.Name())
+		assert.Empty(t, dir)
+		assert.Empty(t, pkg)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		// Failing rather than hanging the whole package, which is what this used to do.
+		t.Fatal("findRepoRootFrom did not terminate at the filesystem root")
+	}
+}
+
+func TestFindRepoRootFromFindsTheMarker(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "some", "package")
+	require.NoError(t, os.MkdirAll(nested, os.ModeDir|0755))
+	marker := "marker_" + t.Name()
+	require.NoError(t, os.WriteFile(filepath.Join(root, marker), nil, 0644))
+
+	dir, pkg := findRepoRootFrom(nested, marker)
+	assert.Equal(t, root, dir)
+	// Slash-separated whatever the OS gave us, because it is a package name.
+	assert.Equal(t, "some/package", pkg)
+}
+
+func TestIsInRepoRoot(t *testing.T) {
+	// The comparison this replaces was a plain HasPrefix against RepoRoot, which is in the
+	// OS's own separator. Paths that arrive from outside - a file:// URL, a coverage report
+	// from another tool - are slash-separated, so on Windows it never matched and the guard
+	// that uses it silently stopped guarding.
+	old := RepoRoot
+	defer func() { RepoRoot = old }()
+	RepoRoot = filepath.Join(string(filepath.Separator)+"home", "user", "repo")
+	slashed := filepath.ToSlash(RepoRoot)
+
+	assert.True(t, IsInRepoRoot(RepoRoot))
+	assert.True(t, IsInRepoRoot(slashed), "a slash-separated path inside the repo is inside it")
+	assert.True(t, IsInRepoRoot(slashed+"/src/core/utils.go"))
+	assert.True(t, IsInRepoRoot(filepath.Join(RepoRoot, "src", "core")))
+
+	assert.False(t, IsInRepoRoot(slashed+"sitory/src"), "only matches at a path boundary")
+	assert.False(t, IsInRepoRoot("/somewhere/else"))
+	assert.False(t, IsInRepoRoot(""))
+}
+
+func TestTrimRepoRoot(t *testing.T) {
+	old := RepoRoot
+	defer func() { RepoRoot = old }()
+	RepoRoot = filepath.Join(string(filepath.Separator)+"home", "user", "repo")
+	slashed := filepath.ToSlash(RepoRoot)
+
+	assert.Equal(t, "src/core", TrimRepoRoot(slashed+"/src/core"))
+	assert.Equal(t, filepath.Join("src", "core"), TrimRepoRoot(filepath.Join(RepoRoot, "src", "core")))
+	// Left alone rather than mangled when it isn't ours.
+	assert.Equal(t, "/somewhere/else", TrimRepoRoot("/somewhere/else"))
 }

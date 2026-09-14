@@ -1,0 +1,41 @@
+# The shell smoke test from docs/design/windows/02-shell-and-build-actions.md: a pipe, a
+# redirect and two applets in one build action.
+genrule(
+    name = "pipeline",
+    srcs = [
+        "a.txt",
+        "b.txt",
+    ],
+    outs = ["sorted.txt"],
+    cmd = "cat $SRCS | sort > $OUT",
+)
+
+# A build tool that is a shell script. Windows cannot start one by name, having no #! mechanism,
+# but the busybox running the build action reads the line itself - which is why `plz run` is the
+# only place Please has to do that for a script.
+genrule(
+    name = "words",
+    srcs = ["words.txt"],
+    outs = ["words.words"],
+    cmd = "$TOOLS_WC $SRC > $OUT",
+    tools = {"WC": ["//tools:wc"]},
+)
+
+# A bare tool name, the way the genrule codelab's word_count names plain wc. Windows has no
+# directory of such tools for the build path to hold, so Please runs the bundled busybox's applet.
+# The subject of the --shell tests: a test whose command reads its data and the test directory
+# out of the environment, which `plz test --shell` has to set up the way a real run would.
+gentest(
+    name = "data_test",
+    data = ["words.txt"],
+    no_test_output = True,
+    test_cmd = 'grep -q . "$DATA" && [ -d "$TEST_DIR" ] && echo "data_test ran in $TEST_DIR"',
+)
+
+genrule(
+    name = "applet_words",
+    srcs = ["words.txt"],
+    outs = ["applet_words.txt"],
+    cmd = "$TOOLS_WC -w < $SRC > $OUT",
+    tools = {"WC": ["wc"]},
+)

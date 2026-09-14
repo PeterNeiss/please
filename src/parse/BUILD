@@ -19,3 +19,17 @@ go_library(
         "//src/version",
     ],
 )
+
+go_test(
+    name = "internal_package_test",
+    srcs = ["internal_package_test.go"],
+    resources = ["internal.tmpl"],
+    # So //test/windows can run this same binary, cross-built, under Wine.
+    visibility = ["//test/windows:all"],
+    deps = [
+        ":parse",
+        "///third_party/go/github.com_stretchr_testify//assert",
+        "///third_party/go/github.com_stretchr_testify//require",
+        "//src/core",
+    ],
+)

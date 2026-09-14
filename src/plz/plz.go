@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -76,6 +78,11 @@ func Run(targets, preTargets []core.BuildLabel, state *core.BuildState, progress
 	g, ctx := r.group(topctx)
 	r.tasks, r.ctx = g, ctx
 	r.parser = parse.InitParser(state, &r)
+	if parse.ArcatUnavailable(state.Config) {
+		// Nothing that needs arcat can work, which includes extracting any plugin. Say so here
+		// rather than letting it surface much later as a target that doesn't exist.
+		log.Warning("No arcat is published for %s_%s, so anything that needs one - including loading a plugin - will fail. Build it yourself and point [build] arcattool at it.", runtime.GOOS, runtime.GOARCH)
+	}
 	results := state.Results()
 	go checkForCycles(state, results, cancel)
 
@@ -778,8 +785,7 @@ func (r *runner) queueOriginalTask(ctx context.Context, target core.BuildLabel, 
 		prefix = subrepo.Dir(prefix)
 	}
 	for filename := range FindAllBuildFiles(r.state.Config, dir, "") {
-		dirname, _ := filepath.Split(filename)
-		l := core.NewBuildLabel(strings.TrimLeft(strings.TrimPrefix(strings.TrimRight(dirname, "/"), prefix), "/"), "all")
+		l := core.NewBuildLabel(packageNameOf(filename, prefix), "all")
 		l.Subrepo = target.Subrepo
 		r.queueTask(ctx, l, needTest, needBuild)
 	}
@@ -810,6 +816,16 @@ func (r *runner) queueTask(ctx context.Context, target core.BuildLabel, needTest
 		}
 		return r.RecursiveParse(ctx, target, core.OriginalTarget)
 	})
+}
+
+// packageNameOf returns the package a BUILD file found on disk belongs to, relative to prefix.
+//
+// The walk returns paths in the platform's own form, and a package name is slash-separated
+// everywhere. On Windows the directory came back as "src\", which only "/" was trimmed from, so
+// `plz test //src/...` panicked with "Invalid package name: src\".
+func packageNameOf(filename, prefix string) string {
+	dirname, _ := path.Split(filepath.ToSlash(filename))
+	return strings.TrimLeft(strings.TrimPrefix(strings.TrimRight(dirname, "/"), filepath.ToSlash(prefix)), "/")
 }
 
 // FindAllBuildFiles finds all BUILD files under a particular path.

@@ -67,6 +67,13 @@ func TestLink(t *testing.T) {
 }
 
 func TestSymlink(t *testing.T) {
+	if IsWine() {
+		// Only under Wine, where os.Symlink reports success and produces a link os.Lstat then
+		// cannot find - so this asserts nothing there. Real Windows is the case worth testing:
+		// it refuses without Developer Mode or SeCreateSymbolicLinkPrivilege, which is what
+		// SymlinkOrCopy's fallback exists for, and what the CI runner actually has.
+		t.Skip("Wine's symlinks are not real enough to assert against; see docs/design/windows")
+	}
 	var tests = []struct {
 		description string
 		srcExists   bool

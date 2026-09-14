@@ -669,7 +669,11 @@ func addOutputDirectoryToBuildOutput(target *core.BuildTarget, dir core.OutputDi
 
 func copyOutDir(target *core.BuildTarget, from string, to string) ([]string, error) {
 	relativeToTmpdir := func(path string) string {
-		return strings.TrimPrefix(strings.TrimPrefix(path, target.TmpDir()), "/")
+		// ToSlash first: the argument was assembled with filepath.Join and so uses the host
+		// separator, while TmpDir is slash-separated. Without it neither prefix matches on
+		// Windows, the whole path survives as the output name, and moveOutputs then joins the
+		// temp directory onto a path that already contains it.
+		return strings.TrimPrefix(strings.TrimPrefix(filepath.ToSlash(path), target.TmpDir()), "/")
 	}
 
 	var outs []string
@@ -696,6 +700,17 @@ func copyOutDir(target *core.BuildTarget, from string, to string) ([]string, err
 	outs = append(outs, relativeToTmpdir(to))
 	target.AddOutput(outs[0])
 	return outs, os.Rename(from, to)
+}
+
+// fileURLPath returns the filesystem path a file:// URL refers to.
+// The path component of such a URL always begins with a slash, so on Windows the drive letter
+// arrives as /C:/foo and the slash has to come off before it is an absolute path at all.
+func fileURLPath(url string) string {
+	path := strings.TrimPrefix(url, "file://")
+	if filepath.Separator == '\\' && len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+		return path[1:]
+	}
+	return path
 }
 
 func moveOutputs(state *core.BuildState, target *core.BuildTarget) ([]string, bool, error) {
@@ -1014,11 +1029,14 @@ func checkLicences(state *core.BuildState, target *core.BuildTarget) {
 // buildLinks builds links from the given target if it's labelled appropriately.
 // For example, Go targets may link themselves into plz-out/go/src etc.
 func buildLinks(state *core.BuildState, target *core.BuildTarget) {
-	buildLinksOfType(state, target, "link:", false, os.Symlink)
+	// SymlinkOrCopy rather than os.Symlink: Windows refuses to create one without a privilege
+	// an ordinary user does not have, and a link: label that silently becomes a warning is
+	// worse than a copy.
+	buildLinksOfType(state, target, "link:", false, fs.SymlinkOrCopy)
 	buildLinksOfType(state, target, "hlink:", false, os.Link)
 
 	// Directly link to the path of the label for these (i.e. don't append out to the destination dir)
-	buildLinksOfType(state, target, "dlink:", true, os.Symlink)
+	buildLinksOfType(state, target, "dlink:", true, fs.SymlinkOrCopy)
 	buildLinksOfType(state, target, "dhlink:", true, os.Link)
 
 	if state.Config.ShouldLinkGeneratedSources() && target.HasLabel("codegen") {
@@ -1093,10 +1111,10 @@ func fetchOneRemoteFile(state *core.BuildState, target *core.BuildTarget, url st
 	}
 	defer f.Close()
 	if strings.HasPrefix(url, "file://") {
-		filename := strings.TrimPrefix(url, "file://")
+		filename := fileURLPath(url)
 		if !filepath.IsAbs(filename) {
 			return fmt.Errorf("URL %s must be an absolute path", url)
-		} else if strings.HasPrefix(filename, core.RepoRoot) {
+		} else if core.IsInRepoRoot(filename) {
 			return fmt.Errorf("URL %s is within the repo, you cannot use remote_file for this", url)
 		}
 		fromfile, err := os.Open(filename)
