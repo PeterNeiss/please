@@ -181,10 +181,12 @@ Each of these has already cost time once.
 - **`wine foo.cmd` does not run it as Windows would.** What Wine cannot load as a PE it hands
   to the host, so a `.cmd` that still has a Unix shebang on it runs under `/bin/sh` and passes
   the test you wrote to catch exactly that. Go through `cmd.exe` explicitly.
-- **`plz update` on Windows fetches only the bare binary, not the zip.** Everything else the
-  release ships - busybox, arcat, and the plz.cmd shim - stays at the
-  version it was first installed at, silently, getting staler with each update. Nothing has
-  ever exercised this.
+- **`plz update` only knows the bucket's layout, `windows_amd64/<version>/please_<version>.zip`.**
+  It used to fetch the bare `please.exe` and leave busybox, arcat and `plz.cmd` at whatever
+  version was first installed; it now downloads and unpacks the zip, which `update_test` covers
+  on Linux, under Wine and natively. But this fork publishes GitHub Releases, whose asset names
+  and paths are shaped differently, so `plz update` against the fork's releases finds nothing.
+  `pleasew.ps1` and `get_plz.ps1` handle both layouts; `plz update` does not.
 - **Python under Wine needs its output to be a pipe.** Wine's console emulation hands it handles
   it rejects at startup otherwise, and the error — `can't initialize sys standard streams` — reads
   like a problem with whatever you were testing. It is not.

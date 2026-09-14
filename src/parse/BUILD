@@ -6,7 +6,7 @@ go_library(
         "parse_step.go",
     ],
     pgo_file = "//:pgo",
-    resources = glob(["internal.tmpl"]),
+    resources = ["internal.tmpl"],
     visibility = ["PUBLIC"],
     deps = [
         "//rules",
@@ -21,8 +21,8 @@ go_library(
 )
 
 go_test(
-    name = "parse_step_test",
-    srcs = ["parse_step_test.go"],
+    name = "internal_package_test",
+    srcs = ["internal_package_test.go"],
     resources = ["internal.tmpl"],
     # So //test/windows can run this same binary, cross-built, under Wine.
     visibility = ["//test/windows:all"],

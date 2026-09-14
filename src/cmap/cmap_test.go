@@ -26,6 +26,8 @@ func TestMap(t *testing.T) {
 	assert.Equal(t, []int{5, 7}, vals)
 }
 
+// TestWait covers the awaiting primitive directly; it's only reachable through ErrMap now,
+// but it's the bit with the interesting concurrency so it's worth pinning down here.
 func TestWait(t *testing.T) {
 	m := New[int, int](DefaultShardCount, hashInts)
 	v, ch, first := m.GetOrWait(5)
@@ -41,59 +43,21 @@ func TestWait(t *testing.T) {
 	assert.False(t, first)
 }
 
+func TestGetDoesntInsert(t *testing.T) {
+	m := New[int, int](DefaultShardCount, hashInts)
+	assert.Equal(t, 0, m.Get(5))
+	// A failed lookup must not leave an entry behind; anything that later tries to set this key
+	// would find something already waiting on it and never get to do the work.
+	assert.False(t, m.Contains(5))
+}
+
 func TestReAdd(t *testing.T) {
 	m := New[int, int](DefaultShardCount, hashInts)
 	assert.True(t, m.Add(5, 7))
-	assert.False(t, m.Add(5, 7))
-	v, ch, first := m.GetOrWait(5)
-	assert.Nil(t, ch)
-	assert.Equal(t, 7, v)
-	assert.False(t, first)
-	m.Set(5, 8)
-	v, ch, first = m.GetOrWait(5)
-	assert.Nil(t, ch)
-	assert.Equal(t, 8, v)
-	assert.False(t, first)
-}
-
-func TestDelete(t *testing.T) {
-	m := New[int, int](DefaultShardCount, hashInts)
-	assert.True(t, m.Add(5, 7))
-	v, deleted := m.Delete(5)
-	assert.True(t, deleted)
-	assert.Equal(t, 7, v)
-	assert.False(t, m.Contains(5))
-	// Deleting it again does nothing, and the key is free to be added afresh.
-	_, deleted = m.Delete(5)
-	assert.False(t, deleted)
-	assert.True(t, m.Add(5, 9))
-	assert.Equal(t, 9, m.Get(5))
-}
-
-func TestDeleteLeavesWaitersAlone(t *testing.T) {
-	// A key that only exists because something is waiting on it has no value to delete, and
-	// removing it would leave the waiter waiting on a channel nothing can close.
-	m := New[int, int](DefaultShardCount, hashInts)
-	_, ch, first := m.GetOrWait(5)
-	assert.True(t, first)
-	_, deleted := m.Delete(5)
-	assert.False(t, deleted)
-	m.Set(5, 7)
-	<-ch
+	assert.False(t, m.Add(5, 8))
 	assert.Equal(t, 7, m.Get(5))
-}
-
-func TestAddOrGet(t *testing.T) {
-	m := New[int, int](DefaultShardCount, hashInts)
-	x, inserted := m.AddOrGet(5, func() int { return 7 })
-	assert.True(t, inserted)
-	assert.Equal(t, 7, x)
-	x, inserted = m.AddOrGet(5, func() int { return 8 })
-	assert.False(t, inserted)
-	assert.Equal(t, 7, x)
-	x, inserted = m.AddOrGet(8, func() int { return 9 })
-	assert.True(t, inserted)
-	assert.Equal(t, 9, x)
+	m.Set(5, 8)
+	assert.Equal(t, 8, m.Get(5))
 }
 
 func TestShardCount(t *testing.T) {
@@ -118,10 +82,7 @@ func TestResize(t *testing.T) {
 				m.Set(i, i)
 			}
 			for i := 0; i < n; i++ {
-				v, ch, first := m.GetOrWait(i)
-				assert.Equal(t, i, v, "Key %d appears to be not set or set incorrectly", i)
-				assert.Nil(t, ch)
-				assert.False(t, first)
+				assert.Equal(t, i, m.Get(i), "Key %d appears to be not set or set incorrectly", i)
 			}
 		})
 	}
