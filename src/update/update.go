@@ -10,7 +10,9 @@ package update
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -204,6 +206,12 @@ func downloadAndLinkPlease(config *core.Configuration, verify bool, progress boo
 }
 
 func downloadPlease(config *core.Configuration, verify bool, progress bool) {
+	downloadPleaseFor(config, runtime.GOOS, verify, progress)
+}
+
+// downloadPleaseFor is downloadPlease for the release published for the given OS. Releases differ in
+// kind as well as content between platforms, so the tests fetch the Windows one from anywhere.
+func downloadPleaseFor(config *core.Configuration, goos string, verify bool, progress bool) {
 	newDir := filepath.Join(config.Please.Location, config.Please.Version.VersionString())
 	if err := os.MkdirAll(newDir, core.DirPermissions); err != nil {
 		log.Fatalf("Failed to create directory %s: %s", newDir, err)
@@ -228,12 +236,9 @@ func downloadPlease(config *core.Configuration, verify bool, progress bool) {
 	}
 
 	url := strings.TrimSuffix(config.Please.DownloadLocation.String(), "/")
-	ext := ""
-	if shouldDownloadFullDist(config.Please.Version) {
-		ext = ".tar.xz"
-	}
+	ext := releaseExt(config.Please.Version, goos)
 	v := config.Please.Version.VersionString()
-	url = fmt.Sprintf("%s/%s_%s/%s/please_%s%s", url, runtime.GOOS, runtime.GOARCH, v, v, ext)
+	url = fmt.Sprintf("%s/%s_%s/%s/please_%s%s", url, goos, runtime.GOARCH, v, v, ext)
 	pleaseReadCloser := mustDownload(url, progress)
 	defer mustClose(pleaseReadCloser)
 	var pleaseReader io.Reader = bufio.NewReader(pleaseReadCloser)
@@ -250,15 +255,34 @@ func downloadPlease(config *core.Configuration, verify bool, progress bool) {
 		log.Warning("Signature verification disabled for %s", url)
 	}
 
-	if shouldDownloadFullDist(config.Please.Version) {
+	switch ext {
+	case ".tar.xz":
 		xzr, err := xz.NewReader(pleaseReader)
 		if err != nil {
 			panic(fmt.Sprintf("%s isn't a valid xzip file: %s", url, err))
 		}
 		copyTarFile(xzr, newDir, url)
-	} else {
+	case ".zip":
+		copyZipFile(pleaseReader, newDir, url)
+	default:
 		copyFile(pleaseReader, newDir)
 	}
+}
+
+// releaseExt returns the extension of the artifact to download for a version of Please on an OS,
+// or nothing for the bare binary.
+//
+// A Windows release is a zip of everything an install needs, because please.exe relies on what
+// ships beside it: busybox runs its build actions, and arcat and the plz.cmd shim have nowhere
+// else to come from. Downloading only the binary would leave those at whatever version was first
+// installed.
+func releaseExt(version cli.Version, goos string) string {
+	if shouldDownloadFullDist(version) {
+		return ".tar.xz"
+	} else if goos == "windows" {
+		return ".zip"
+	}
+	return ""
 }
 
 func copyFile(r io.Reader, newDir string) {
@@ -288,6 +312,57 @@ func copyTarFile(zr io.Reader, newDir, url string) {
 			panic(err)
 		}
 	}
+}
+
+// copyZipFile extracts a release zip into newDir. Everything in one is under a single top-level
+// directory, which is stripped the same way it is for a tarball.
+func copyZipFile(r io.Reader, newDir, url string) {
+	// A zip's index is at its end, so the whole thing has to be read before any of it can be extracted.
+	b, err := io.ReadAll(r)
+	if err != nil {
+		panic(fmt.Sprintf("Error downloading %s: %s", url, err))
+	}
+	zr, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		panic(fmt.Sprintf("%s isn't a valid zip file: %s", url, err))
+	}
+	for _, f := range zr.File {
+		if err := writeZipFile(f, newDir); err != nil {
+			panic(fmt.Sprintf("Error unzipping %s: %s", url, err))
+		}
+	}
+}
+
+// writeZipFile writes a file from a release zip into destination, without its top-level directory.
+func writeZipFile(f *zip.File, destination string) error {
+	// Entry names in a zip are slash-separated whatever platform wrote them.
+	_, stripped, found := strings.Cut(f.Name, "/")
+	if !found || stripped == "" || strings.HasSuffix(stripped, "/") {
+		return nil // The top-level directory itself, or another directory entry; neither is relied on.
+	}
+	name := filepath.FromSlash(stripped)
+	if !filepath.IsLocal(name) {
+		return fmt.Errorf("%s would be extracted outside %s", f.Name, destination)
+	}
+	dest := filepath.Join(destination, name)
+	if err := os.MkdirAll(filepath.Dir(dest), core.DirPermissions); err != nil {
+		return fmt.Errorf("Can't make destination directory: %s", err)
+	}
+	log.Info("Extracting %s to %s", f.Name, dest)
+	src, err := f.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fileMode(name))
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, src); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // mustDownload downloads the contents of the given URL and returns its body
