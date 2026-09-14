@@ -38,9 +38,9 @@ WINDOWS_GO_TESTS = [
         False,
     ),
     ("cli_test", "///windows_amd64//src/cli:cli_test", [], False),
-    # Parsing is the valuable one: the BUILD language interpreter handles paths from every
-    # direction.
-    ("parse_test", "///windows_amd64//src/parse:parse_step_test", [], False),
+    # Generating the internal package, which is where a platform without a published arcat is
+    # handled. The parsing itself is covered by asp_test below.
+    ("parse_test", "///windows_amd64//src/parse:internal_package_test", [], False),
     (
         "asp_test",
         "///windows_amd64//src/parse/asp:asp_test",
