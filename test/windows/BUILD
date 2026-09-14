@@ -170,6 +170,57 @@ wine_plz_test(
     repo = "smoke_repo",
 )
 
+# --shell prepares a target's directory and then opens the configured shell in it, which on Windows
+# is the bundled busybox. Both tests lay the release out as wine_plz_test does, but drive please.exe
+# themselves: the interactive one feeds the shell on stdin, and both look in plz-out/tmp rather than
+# plz-out/gen, which --shell never writes to.
+SHELL_TEST_DATA = {
+    "PLEASE": ["///windows_amd64//src:please"],
+    "BUSYBOX": ["///windows_amd64//third_party/binary:busybox"],
+    "REPO": ["smoke_repo"],
+}
+
+SHELL_TEST_SETUP = [
+    "mkdir -p plzdir",
+    'cp "$DATA_PLEASE" plzdir/please.exe',
+    'cp "$DATA_BUSYBOX" plzdir/busybox.exe',
+    'cp -r "$DATA_REPO" repo',
+    "cd repo",
+]
+
+# --shell=run runs the command in that shell and nothing else.
+wine_script_test(
+    name = "shell_run_test",
+    cmds = SHELL_TEST_SETUP + [
+        "wine ../plzdir/please.exe build --shell=run //:pipeline",
+        "diff -u expected_sorted.txt plz-out/tmp/pipeline._build/sorted.txt",
+        "wine ../plzdir/please.exe test --shell=run //:data_test > ../test_output",
+        "cat ../test_output",
+        "grep -qx 'data_test ran in [A-Z]:/.*/plz-out/tmp/data_test._test/run_1' ../test_output",
+        # The directory is printed for pasting into that shell, so it must not have backslashes.
+        "grep -q '^  //:data_test: [A-Z]:/.*/run_1$' ../test_output",
+    ],
+    data = SHELL_TEST_DATA,
+)
+
+# Plain --shell is interactive. Its stdin here is a script rather than a console, which is as close
+# as a test gets: it covers where the shell starts and what it has in its environment.
+wine_script_test(
+    name = "interactive_shell_test",
+    cmds = SHELL_TEST_SETUP + [
+        "printf '%s\\n' 'eval \"$CMD\" && echo EVAL_OK' pwd | wine ../plzdir/please.exe build --shell //:pipeline > ../build_output",
+        "cat ../build_output",
+        "grep -qx EVAL_OK ../build_output",
+        "grep -qx '[A-Z]:/.*/plz-out/tmp/pipeline._build' ../build_output",
+        "diff -u expected_sorted.txt plz-out/tmp/pipeline._build/sorted.txt",
+        "printf '%s\\n' 'eval \"$CMD\"' 'echo \"DATA=$DATA\"' | wine ../plzdir/please.exe test --shell //:data_test > ../test_output",
+        "cat ../test_output",
+        "grep -qx 'data_test ran in [A-Z]:/.*/plz-out/tmp/data_test._test/run_1' ../test_output",
+        "grep -qx DATA=words.txt ../test_output",
+    ],
+    data = SHELL_TEST_DATA,
+)
+
 # A .pex is a zip with an executable stub in front of it, so on Windows it needs a Windows stub;
 # the one please_pex prepends everywhere else is an ELF binary and will not run at all. This
 # checks the whole chain - the preamble runs, finds an interpreter, and Python imports the test

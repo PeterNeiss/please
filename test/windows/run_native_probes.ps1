@@ -31,14 +31,17 @@ function Write-Summary([string] $Text) {
     else { Write-Host $Text }
 }
 
-function Invoke-Plz([string] $WorkDir, [string[]] $PlzArgs, [string] $LogName) {
+function Invoke-Plz([string] $WorkDir, [string[]] $PlzArgs, [string] $LogName, [string] $InputFile = '') {
     $log = Join-Path $Logs $LogName
+    $redirect = @{ RedirectStandardOutput = "$log.out"; RedirectStandardError = "$log.err" }
+    # For plz --shell, whose shell reads its commands from here rather than from a console.
+    if ($InputFile) { $redirect.RedirectStandardInput = $InputFile }
     Push-Location $WorkDir
     try {
         # Not the repository checkout: .plzconfig_windows_amd64 names MinGW tools that are not
         # on this machine, and a native plz reads it. The fixtures carry their own config.
         $proc = Start-Process -FilePath $script:PleaseExe -ArgumentList $PlzArgs `
-            -NoNewWindow -PassThru -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
+            -NoNewWindow -PassThru @redirect
         $proc.WaitForExit()
         $proc.Refresh()
         Get-Content -LiteralPath "$log.out", "$log.err" -EA SilentlyContinue | Set-Content -LiteralPath $log
@@ -120,6 +123,45 @@ if ($code -ne 0) {
     if (Compare-Object $got $want) {
         $problems += "//:applet_words produced '$($got -join ',')' rather than '$($want -join ',')'"
     }
+}
+
+# --- plz --shell ----------------------------------------------------------------------------
+
+# --shell prepares a target's directory and opens the bundled busybox in it, attached to our own
+# console. Under Wine that console is a pipe either way; here it is the real thing, so check the
+# release both runs the command in that shell and hands the shell its stdin.
+Write-Host "::group::build --shell=run //:pipeline"
+$code = Invoke-Plz $work @('build', '--shell=run', '//:pipeline') 'shell_run.log'
+Write-Host '::endgroup::'
+if ($code -ne 0) {
+    $problems += "build --shell=run //:pipeline exited $code"
+} else {
+    $got = Get-Content (Join-Path $work 'plz-out\tmp\pipeline._build\sorted.txt')
+    $want = Get-Content (Join-Path $work 'expected_sorted.txt')
+    if (Compare-Object $got $want) {
+        $problems += "build --shell=run //:pipeline produced '$($got -join ',')' rather than '$($want -join ',')'"
+    }
+}
+
+# Unix line endings: busybox would read a carriage return as part of the command.
+$shellInput = Join-Path $env:RUNNER_TEMP 'shell_input.txt'
+[IO.File]::WriteAllText($shellInput, "eval `"`$CMD`" && echo EVAL_OK`nexit 0`n")
+Write-Host "::group::build --shell //:pipeline, with commands on stdin"
+$code = Invoke-Plz $work @('build', '--shell', '//:pipeline') 'shell_interactive.log' $shellInput
+Write-Host '::endgroup::'
+if ($code -ne 0) {
+    $problems += "build --shell //:pipeline exited $code"
+} elseif (-not (Select-String -Path (Join-Path $Logs 'shell_interactive.log') -Pattern '^EVAL_OK\s*$' -Quiet)) {
+    $problems += "build --shell //:pipeline did not run the commands it was given on stdin"
+}
+
+Write-Host "::group::test --shell=run //:data_test"
+$code = Invoke-Plz $work @('test', '--shell=run', '//:data_test') 'shell_test.log'
+Write-Host '::endgroup::'
+if ($code -ne 0) {
+    $problems += "test --shell=run //:data_test exited $code"
+} elseif (-not (Select-String -Path (Join-Path $Logs 'shell_test.log') -Pattern '^data_test ran in ' -Quiet)) {
+    $problems += "test --shell=run //:data_test did not run the test command"
 }
 
 # --- files held open on teardown ------------------------------------------------------------
