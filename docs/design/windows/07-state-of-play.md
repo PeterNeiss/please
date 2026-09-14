@@ -1,6 +1,6 @@
 # State of Play
 
-Status: **Living document** · Last updated: 2026-09-13
+Status: **Living document** · Last updated: 2026-09-14
 
 Where the Windows port actually is, and what to pick up next. `06-milestones.md` is the
 per-milestone tracker with the reasoning; this is the short version for someone starting cold.
@@ -15,8 +15,17 @@ The release is a `.zip` containing `please.exe`, `busybox.exe`, `build_langserve
 `plz.cmd` shim; extracting it and running `plz.cmd` builds a genrule with no configuration at
 all.
 
-Test coverage on Linux is unchanged and green. Coverage *of Windows behaviour* is 34 targets and
-873 tests under Wine, run by a blocking CI job and by `./test.sh` as a third pass. Eight of those
+`plz build --shell` and `plz test --shell`, with and without `=run`, open the bundled busybox in
+the target's directory with its environment set, and `eval "$CMD"` there does what the build would.
+Nothing had checked that until `//test/windows:shell_run_test` and `:interactive_shell_test` under
+Wine, plus a native probe. The only defect was the printed directory, which for a test came out
+backslash-separated and could not be pasted into that shell. Still unverified: Ctrl-C at an
+interactive prompt on a real console. It reaches please.exe as well as busybox, and unlike
+`ExecReplace`, `printTempDirs` does not ignore it, so please.exe may exit and leave the shell behind.
+Only a person at a console can check this.
+
+Test coverage on Linux is unchanged and green. Coverage *of Windows behaviour* is 36 targets and
+875 tests under Wine, run by a blocking CI job and by `./test.sh` as a third pass. Eight of those
 targets only exist when a local plugin checkout is configured — see below.
 
 **And 809 of those tests now run on a real Windows machine, with no Windows-specific skips

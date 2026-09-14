@@ -439,7 +439,9 @@ func printTempDirs(state *core.BuildState, duration time.Duration, shell, shellR
 			log.Errorf("Error pre-processing command: %s", err.Error())
 		}
 		env["CMD"] = cmd
-		fmt.Printf("  %s: %s\n", label, dir)
+		// Slash-separated: this is the directory someone pastes into the shell we are about to
+		// open, where a backslash is an escape character rather than a separator.
+		fmt.Printf("  %s: %s\n", label, filepath.ToSlash(dir))
 		fmt.Printf("    Command: %s\n", cmd)
 		if !shell {
 			// This isn't very useful if we're opening a shell (since then the vars will be set anyway)
